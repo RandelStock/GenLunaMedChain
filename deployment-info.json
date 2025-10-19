@@ -1,0 +1,11 @@
+{
+  "network": "polygon_amoy",
+  "contractAddress": "0xC6B4433275c4f11903663d9661a0ED9e615fe460",
+  "transactionHash": "0x11c9bb5b1921e4981266284317a01aa16f2ad3221ae01be35313004a96ee3c42",
+  "blockNumber": null,
+  "gasUsed": "5000000",
+  "gasPrice": "1000000000",
+  "explorerUrl": "https://amoy.polygonscan.com/address/0xC6B4433275c4f11903663d9661a0ED9e615fe460",
+  "deployedAt": "2025-10-18T16:46:20.614Z",
+  "deployerAddress": "0x7EDe510897C82b9469853a46cF5f431F04F081a9"
+}

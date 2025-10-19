@@ -1,17 +1,42 @@
 {
   "name": "hardhat-javascript-starter",
+  "version": "1.0.0",
+  "type": "module",
   "scripts": {
     "build": "npx thirdweb@latest detect",
     "deploy": "npx thirdweb@latest deploy",
-    "publish": "npx thirdweb@latest publish"
+    "publish": "npx thirdweb@latest publish",
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "deploy:testnet": "node scripts/deploy-testnet.js",
+    "db:generate": "npx prisma generate",
+    "db:push": "npx prisma db push",
+    "db:seed": "npx prisma db seed",
+    "db:reset": "npx prisma migrate reset --force",
+    "db:migrate": "npx prisma migrate deploy"
   },
   "devDependencies": {
     "@matterlabs/hardhat-zksync-solc": "^1.1.14",
     "@matterlabs/hardhat-zksync-verify": "^1.7.1",
-    "hardhat": "^2.19.1"
+    "@nomicfoundation/hardhat-toolbox": "^6.1.0",
+    "hardhat": "^2.26.3",
+    "nodemon": "^3.1.10",
+    "prisma": "^6.16.3"
   },
   "dependencies": {
+    "@openzeppelin/contracts": "^5.3.0",
+    "@prisma/client": "^6.16.3",
     "@thirdweb-dev/contracts": "^3.8.0",
+    "body-parser": "^2.2.0",
+    "chart.js": "^4.5.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "ethers": "^6.7.0",
+    "express": "^5.1.0",
+    "react-chartjs-2": "^5.3.0",
     "zksync-ethers": "^5.7.0"
+  },
+  "prisma": {
+    "seed": "node seed.js"
   }
 }

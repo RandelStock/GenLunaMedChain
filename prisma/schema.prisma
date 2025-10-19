@@ -1,0 +1,605 @@
+// Enhanced Prisma schema with Barangay-specific medicine management
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------
+// Enums
+// ---------------------------
+enum Role {
+  ADMIN // Municipal admin - sees all barangays
+  PHARMACIST // Barangay pharmacist - sees only their barangay
+  STAFF // Barangay staff - sees only their barangay
+  MUNICIPAL_STAFF // Municipal staff - sees all barangays (read-only)
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum RemovalReason {
+  EXPIRED
+  ENTRY_ERROR
+  DAMAGED
+  LOST
+  OTHER
+}
+
+enum TxStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+}
+
+enum CenterType {
+  RHU
+  BARANGAY
+}
+
+enum Barangay {
+  BACONG_IBABA
+  BACONG_ILAYA
+  BARANGAY_1_POBLACION
+  BARANGAY_2_POBLACION
+  BARANGAY_3_POBLACION
+  BARANGAY_4_POBLACION
+  BARANGAY_5_POBLACION
+  BARANGAY_6_POBLACION
+  BARANGAY_7_POBLACION
+  BARANGAY_8_POBLACION
+  BARANGAY_9_POBLACION
+  LAVIDES
+  MAGSAYSAY
+  MALAYA
+  NIEVA
+  RECTO
+  SAN_IGNACIO_IBABA
+  SAN_IGNACIO_ILAYA
+  SAN_ISIDRO_IBABA
+  SAN_ISIDRO_ILAYA
+  SAN_JOSE
+  SAN_NICOLAS
+  SAN_VICENTE
+  SANTA_MARIA_IBABA
+  SANTA_MARIA_ILAYA
+  SUMILANG
+  VILLARICA
+  MUNICIPAL // For municipal health center
+}
+
+enum AgeCategory {
+  ZERO_TO_23_MONTHS
+  TWENTY_FOUR_TO_59_MONTHS
+  SIXTY_TO_71_MONTHS
+  ABOVE_71_MONTHS
+}
+
+// ---------------------------
+// Users - NOW WITH BARANGAY ASSIGNMENT
+// ---------------------------
+model users {
+  user_id        Int     @id @default(autoincrement())
+  wallet_address String  @unique @db.VarChar(42)
+  full_name      String  @db.VarChar(255)
+  email          String? @db.VarChar(255)
+  phone          String? @db.VarChar(50)
+  role           Role
+
+  // NEW: Barangay assignment for staff/pharmacists
+  assigned_barangay Barangay? // NULL for ADMIN/MUNICIPAL_STAFF, specific barangay for others
+
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now())
+
+  medicine_records_created   medicine_records[]  @relation("medicine_records_created_by")
+  medicine_stocks_added      medicine_stocks[]   @relation("medicine_stocks_added_by")
+  medicine_releases_released medicine_releases[] @relation("medicine_releases_released_by")
+  stock_removals_removed     stock_removals[]    @relation("stock_removals_removed_by")
+  audit_logs_changed         audit_log[]         @relation("audit_log_changed_by")
+  calendar_events_created    calendar_events[]   @relation("calendar_events_created_by")
+  consultations_assigned_as_doctor consultations[] @relation("consultations_assigned_doctor")
+  consultations_assigned_as_nurse consultations[] @relation("consultations_assigned_nurse")
+  provider_availability provider_availability[]
+  provider_specializations provider_specializations[]
+
+  @@index([assigned_barangay])
+  @@map("users")
+}
+
+// ---------------------------
+// Medicines - NOW BARANGAY-SPECIFIC
+// ---------------------------
+model medicine_records {
+  medicine_id          Int     @id @default(autoincrement())
+  medicine_name        String  @db.VarChar(255)
+  medicine_type        String? @db.VarChar(100)
+  description          String?
+  generic_name         String? @db.VarChar(255)
+  dosage_form          String? @db.VarChar(100)
+  strength             String? @db.VarChar(100)
+  manufacturer         String? @db.VarChar(255)
+  category             String? @db.VarChar(100)
+  storage_requirements String?
+  total_quantity       Int     @default(0)
+
+  // NEW: Barangay ownership
+  barangay Barangay // Which barangay health center owns this medicine
+
+  is_active Boolean @default(true)
+
+  blockchain_hash    String? @unique @db.VarChar(66)
+  blockchain_tx_hash String? @db.VarChar(66)
+  transaction_hash   String? @db.VarChar(66)
+
+  created_at      DateTime  @default(now())
+  created_by      Int?
+  created_by_user users?    @relation(fields: [created_by], references: [user_id], name: "medicine_records_created_by")
+  updated_at      DateTime  @default(now())
+  last_synced_at  DateTime?
+
+  medicine_stocks   medicine_stocks[]
+  medicine_releases medicine_releases[]
+  stock_removals    stock_removals[]
+  audit_logs        audit_log[]
+
+  @@index([barangay])
+  @@index([barangay, is_active])
+  @@map("medicines")
+}
+
+// ---------------------------
+// Suppliers - SHARED ACROSS ALL BARANGAYS
+// ---------------------------
+model suppliers {
+  supplier_id    Int      @id @default(autoincrement())
+  supplier_name  String   @db.VarChar(255)
+  contact_person String?  @db.VarChar(255)
+  phone          String?  @db.VarChar(50)
+  email          String?  @db.VarChar(255)
+  address        String?
+  is_active      Boolean  @default(true)
+  created_at     DateTime @default(now())
+
+  medicine_stocks medicine_stocks[]
+
+  @@map("suppliers")
+}
+
+// ---------------------------
+// Stocks - INHERITS BARANGAY FROM MEDICINE
+// ---------------------------
+model medicine_stocks {
+  stock_id    Int              @id @default(autoincrement())
+  medicine_id Int
+  medicine    medicine_records @relation(fields: [medicine_id], references: [medicine_id])
+
+  // Barangay is implicitly determined by the medicine's barangay
+
+  batch_number       String     @db.VarChar(100)
+  quantity           Int
+  remaining_quantity Int
+  unit_cost          Decimal?   @db.Decimal(10, 2)
+  total_cost         Decimal?   @db.Decimal(12, 2)
+  supplier_id        Int?
+  supplier           suppliers? @relation(fields: [supplier_id], references: [supplier_id])
+  supplier_name      String?    @db.VarChar(255)
+  date_received      DateTime
+  expiry_date        DateTime
+  storage_location   String?    @db.VarChar(100)
+  is_active          Boolean    @default(true)
+
+  blockchain_hash    String?   @db.VarChar(66)
+  blockchain_tx_hash String?   @db.VarChar(66)
+  added_by_wallet    String?   @db.VarChar(42)
+  added_by_user_id   Int?
+  added_by_user      users?    @relation(fields: [added_by_user_id], references: [user_id], name: "medicine_stocks_added_by")
+  created_at         DateTime  @default(now())
+  last_synced_at     DateTime?
+
+  medicine_releases medicine_releases[]
+  stock_removals    stock_removals[]
+  transactions      stock_transactions[]
+
+  @@unique([medicine_id, batch_number])
+  @@map("stocks")
+}
+
+model stock_transactions {
+  transaction_id      Int      @id @default(autoincrement())
+  stock_id            Int
+  transaction_type    String // 'ADDITION' or 'REMOVAL'
+  quantity_changed    Int
+  quantity_before     Int
+  quantity_after      Int
+  transaction_date    DateTime
+  performed_by_wallet String?
+  blockchain_tx_hash  String?
+  notes               String?
+  created_at          DateTime @default(now())
+
+  stock medicine_stocks @relation(fields: [stock_id], references: [stock_id])
+
+  @@index([stock_id])
+  @@index([transaction_date])
+}
+
+// ---------------------------
+// Residents - WITH BARANGAY TRACKING
+// ---------------------------
+model residents {
+  resident_id   Int          @id @default(autoincrement())
+  first_name    String       @db.VarChar(100)
+  middle_name   String?      @db.VarChar(100)
+  last_name     String       @db.VarChar(100)
+  full_name     String?      @db.VarChar(255)
+  date_of_birth DateTime?
+  age           Int?
+  age_category  AgeCategory?
+  gender        Gender?
+
+  // Barangay tracking
+  barangay     Barangay // Which barangay the resident belongs to
+  zone         String?  @db.VarChar(50)
+  household_no String?  @db.VarChar(50)
+  family_no    String?  @db.VarChar(50)
+
+  // Tracking fields
+  is_4ps_member       Boolean @default(false)
+  is_pregnant         Boolean @default(false)
+  is_senior_citizen   Boolean @default(false)
+  is_birth_registered Boolean @default(false)
+
+  // Pregnancy specific fields
+  pregnancy_due_date DateTime?
+  pregnancy_notes    String?
+
+  // Birth registry fields
+  birth_registry_date  DateTime?
+  birth_certificate_no String?   @db.VarChar(100)
+
+  address            String?
+  phone              String?  @db.VarChar(50)
+  emergency_contact  String?  @db.VarChar(255)
+  emergency_phone    String?  @db.VarChar(50)
+  medical_conditions String?
+  allergies          String?
+  is_active          Boolean  @default(true)
+  created_at         DateTime @default(now())
+  updated_at         DateTime @default(now())
+
+  medicine_releases medicine_releases[]
+
+  @@index([barangay])
+  @@index([barangay, is_active])
+  @@index([age_category])
+  @@index([is_4ps_member])
+  @@index([is_pregnant])
+  @@index([is_senior_citizen])
+  @@map("residents")
+}
+
+// ---------------------------
+// Medicine Releases - BARANGAY-SPECIFIC
+// ---------------------------
+model medicine_releases {
+  release_id  Int              @id @default(autoincrement())
+  medicine_id Int
+  medicine    medicine_records @relation(fields: [medicine_id], references: [medicine_id])
+  stock_id    Int
+  stock       medicine_stocks  @relation(fields: [stock_id], references: [stock_id])
+
+  resident_id   Int?
+  resident      residents? @relation(fields: [resident_id], references: [resident_id])
+  resident_name String     @db.VarChar(255)
+  resident_age  Int?
+
+  concern           String?
+  quantity_released Int
+  notes             String?  @db.Text
+  date_released     DateTime
+
+  prescription_number String? @db.VarChar(100)
+  prescribing_doctor  String? @db.VarChar(255)
+  dosage_instructions String?
+
+  blockchain_hash     String?   @db.VarChar(66)
+  blockchain_tx_hash  String?   @db.VarChar(66)
+  released_by_wallet  String?   @db.VarChar(42)
+  released_by_user_id Int?
+  released_by_user    users?    @relation(fields: [released_by_user_id], references: [user_id], name: "medicine_releases_released_by")
+  created_at          DateTime  @default(now())
+  last_synced_at      DateTime?
+
+  @@map("receipts")
+}
+
+// ---------------------------
+// Stock Removals - BARANGAY-SPECIFIC
+// ---------------------------
+model stock_removals {
+  removal_id       Int              @id @default(autoincrement())
+  stock_id         Int
+  stock            medicine_stocks  @relation(fields: [stock_id], references: [stock_id])
+  medicine_id      Int
+  medicine         medicine_records @relation(fields: [medicine_id], references: [medicine_id])
+  quantity_removed Int
+  reason           RemovalReason
+  notes            String?          @db.Text
+  date_removed     DateTime
+
+  blockchain_hash    String?   @db.VarChar(66)
+  blockchain_tx_hash String?   @db.VarChar(66)
+  removed_by_wallet  String?   @db.VarChar(42)
+  removed_by_user_id Int?
+  removed_by_user    users?    @relation(fields: [removed_by_user_id], references: [user_id], name: "stock_removals_removed_by")
+  created_at         DateTime  @default(now())
+  last_synced_at     DateTime?
+
+  @@map("stock_removals")
+}
+
+// ---------------------------
+// Blockchain Logs
+// ---------------------------
+model blockchain_transactions {
+  transaction_id   Int     @id @default(autoincrement())
+  tx_hash          String  @db.VarChar(66)
+  block_number     BigInt?
+  contract_address String? @db.VarChar(42)
+  action_type      String  @db.VarChar(50)
+  entity_type      String  @db.VarChar(50)
+  entity_id        Int?
+  from_address     String? @db.VarChar(42)
+
+  // NEW: Track which barangay the transaction is for
+  barangay Barangay?
+
+  gas_used     BigInt?
+  gas_price    BigInt?
+  event_data   Json?
+  status       TxStatus  @default(PENDING)
+  created_at   DateTime  @default(now())
+  confirmed_at DateTime?
+
+  @@unique([tx_hash, action_type, entity_type, entity_id])
+  @@index([tx_hash])
+  @@index([barangay])
+  @@map("blockchain_transactions")
+}
+
+model sync_status {
+  sync_id              Int       @id @default(autoincrement())
+  entity_type          String    @db.VarChar(50)
+  entity_id            Int
+  blockchain_id        Int
+  is_synced            Boolean   @default(false)
+  last_sync_attempt    DateTime?
+  last_successful_sync DateTime?
+  sync_error           String?
+  retry_count          Int       @default(0)
+
+  @@unique([entity_type, entity_id])
+  @@map("sync_status")
+}
+
+// ---------------------------
+// Audit Log
+// ---------------------------
+model audit_log {
+  audit_id          Int      @id @default(autoincrement())
+  table_name        String   @db.VarChar(100)
+  record_id         Int?
+  action            String   @db.VarChar(50)
+  old_values        Json?
+  new_values        Json?
+  changed_by        Int?
+  changed_by_user   users?   @relation(fields: [changed_by], references: [user_id], name: "audit_log_changed_by")
+  changed_by_wallet String?  @db.VarChar(42)
+  changed_at        DateTime @default(now())
+  ip_address        String?  @db.VarChar(45)
+  user_agent        String?
+
+  medicine_id Int?
+  medicine    medicine_records? @relation(fields: [medicine_id], references: [medicine_id], onDelete: SetNull)
+
+  @@index([table_name])
+  @@index([medicine_id])
+  @@map("audit_logs")
+}
+
+// ---------------------------
+// NEW: Barangay Health Centers Table (Optional but Recommended)
+// ---------------------------
+model barangay_health_centers {
+  id             Int      @id @default(autoincrement())
+  barangay       Barangay @unique
+  center_name    String   @db.VarChar(255)
+  address        String?
+  contact_person String?  @db.VarChar(255)
+  phone          String?  @db.VarChar(50)
+  email          String?  @db.VarChar(255)
+
+  // Operational info
+  operating_hours String?
+  bed_capacity    Int?
+  staff_count     Int?
+
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now())
+
+  @@map("barangay_health_centers")
+}
+
+// ---------------------------
+// Calendar Events (Unified Scheduling)
+// ---------------------------
+model calendar_events {
+  event_id      Int        @id @default(autoincrement())
+  title         String     @db.VarChar(255)
+  description   String?
+  start_time    DateTime
+  end_time      DateTime
+  all_day       Boolean    @default(false)
+  center_type   CenterType
+  barangay      Barangay
+  location      String?    @db.VarChar(255)
+  created_by_id Int?
+  created_by    users?     @relation("calendar_events_created_by", fields: [created_by_id], references: [user_id])
+  color         String?    @db.VarChar(20)
+  is_cancelled  Boolean    @default(false)
+  created_at    DateTime   @default(now())
+  updated_at    DateTime   @default(now())
+
+  @@index([barangay])
+  @@index([center_type])
+  @@index([start_time, end_time])
+  @@map("calendar_events")
+}
+
+// ---------------------------
+// Telemedicine Consultations
+// ---------------------------
+model consultations {
+  consultation_id    Int            @id @default(autoincrement())
+  patient_name       String         @db.VarChar(255)
+  patient_email      String?        @db.VarChar(255)
+  patient_phone      String         @db.VarChar(50)
+  patient_age        Int?
+  patient_gender     Gender?
+  patient_barangay   Barangay
+  patient_address    String?
+  
+  // Medical information
+  chief_complaint    String         @db.Text
+  symptoms           String?        @db.Text
+  medical_history    String?        @db.Text
+  current_medications String?       @db.Text
+  allergies          String?        @db.Text
+  
+  // Consultation details
+  consultation_type  ConsultationType
+  scheduled_date     DateTime
+  scheduled_time     String         @db.VarChar(10) // e.g., "09:00", "14:30"
+  duration_minutes   Int            @default(30)
+  status             ConsultationStatus @default(SCHEDULED)
+  
+  // Healthcare provider assignment
+  assigned_doctor_id Int?
+  assigned_doctor    users?         @relation("consultations_assigned_doctor", fields: [assigned_doctor_id], references: [user_id])
+  assigned_nurse_id  Int?
+  assigned_nurse     users?         @relation("consultations_assigned_nurse", fields: [assigned_nurse_id], references: [user_id])
+  
+  // Consultation notes and outcomes
+  consultation_notes String?        @db.Text
+  diagnosis          String?        @db.Text
+  prescription       String?        @db.Text
+  follow_up_required Boolean        @default(false)
+  follow_up_date     DateTime?
+  
+  // Video call details
+  meeting_link       String?        @db.VarChar(500)
+  meeting_id         String?        @db.VarChar(100)
+  meeting_password   String?        @db.VarChar(50)
+  
+  // Audit fields
+  created_at         DateTime       @default(now())
+  updated_at         DateTime       @default(now())
+  completed_at       DateTime?
+  
+  // Blockchain integration
+  blockchain_hash    String?        @unique @db.VarChar(66)
+  blockchain_tx_hash String?        @db.VarChar(66)
+  
+  @@index([patient_barangay])
+  @@index([scheduled_date])
+  @@index([status])
+  @@index([assigned_doctor_id])
+  @@index([assigned_nurse_id])
+  @@map("consultations")
+}
+
+enum ConsultationType {
+  GENERAL
+  FOLLOW_UP
+  EMERGENCY
+  PREVENTIVE
+  SPECIALIST
+}
+
+enum ConsultationStatus {
+  SCHEDULED
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+// ---------------------------
+// Provider Availability Management
+// ---------------------------
+model provider_availability {
+  availability_id    Int      @id @default(autoincrement())
+  provider_id        Int
+  provider           users    @relation(fields: [provider_id], references: [user_id], onDelete: Cascade)
+  
+  // Day of week (0 = Sunday, 1 = Monday, ..., 6 = Saturday)
+  day_of_week        Int      // 0-6
+  start_time         String   @db.VarChar(5) // Format: "08:00"
+  end_time           String   @db.VarChar(5) // Format: "17:00"
+  
+  // Break times (optional)
+  break_start_time   String?  @db.VarChar(5)
+  break_end_time     String?  @db.VarChar(5)
+  
+  // Slot duration in minutes (default 30)
+  slot_duration      Int      @default(30)
+  
+  // Maximum consultations per day
+  max_consultations  Int      @default(10)
+  
+  is_active          Boolean  @default(true)
+  created_at         DateTime @default(now())
+  updated_at         DateTime @default(now())
+  
+  @@unique([provider_id, day_of_week])
+  @@index([provider_id])
+  @@map("provider_availability")
+}
+
+// ---------------------------
+// Provider Specializations
+// ---------------------------
+model provider_specializations {
+  specialization_id  Int      @id @default(autoincrement())
+  provider_id        Int
+  provider           users    @relation(fields: [provider_id], references: [user_id], onDelete: Cascade)
+  
+  specialization     String   @db.VarChar(100) // e.g., "General Medicine", "Pediatrics", "Emergency Care"
+  description        String?  @db.Text
+  years_experience   Int?
+  
+  is_primary         Boolean  @default(false) // Primary specialization
+  created_at         DateTime @default(now())
+  updated_at         DateTime @default(now())
+  
+  @@index([provider_id])
+  @@map("provider_specializations")
+}
+
+enum ProviderType {
+  DOCTOR
+  NURSE
+  SPECIALIST
+  EMERGENCY
+}
