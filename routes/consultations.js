@@ -388,10 +388,19 @@ router.get('/', async (req, res, next) => {
     if (assigned_nurse_id) where.assigned_nurse_id = parseInt(assigned_nurse_id);
     
     if (date_from && date_to) {
-      where.scheduled_date = {
-        gte: new Date(date_from),
-        lte: new Date(date_to)
-      };
+      const start = new Date(date_from);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(date_to);
+      end.setHours(23, 59, 59, 999);
+      where.scheduled_date = { gte: start, lte: end };
+    } else if (date_from) {
+      const start = new Date(date_from);
+      start.setHours(0, 0, 0, 0);
+      where.scheduled_date = { gte: start };
+    } else if (date_to) {
+      const end = new Date(date_to);
+      end.setHours(23, 59, 59, 999);
+      where.scheduled_date = { lte: end };
     }
     
     const [consultations, total] = await Promise.all([
