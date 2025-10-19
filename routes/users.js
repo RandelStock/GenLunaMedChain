@@ -27,6 +27,21 @@ router.get('/role/:walletAddress', async (req, res) => {
     
     console.log('🔍 Looking up role for wallet:', walletAddress);
     
+    // Hardcoded admin wallet addresses
+    const adminWallets = [
+      "0x7EDe510897C82b9469853a46cF5f431F04F081a9"
+    ];
+    
+    // Check if this is a hardcoded admin wallet
+    if (adminWallets.some(addr => addr.toLowerCase() === walletAddress.toLowerCase())) {
+      console.log('✅ Hardcoded admin wallet detected:', walletAddress);
+      return res.json({
+        role: "ADMIN",
+        wallet_address: walletAddress,
+        is_hardcoded: true
+      });
+    }
+    
     // Find user by wallet address (case-insensitive)
     const user = await prisma.users.findFirst({
       where: {

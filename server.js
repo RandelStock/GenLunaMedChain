@@ -31,8 +31,9 @@ const app = express();
 const prisma = new PrismaClient();
 
 app.use(cors({
-  origin: true,
+  origin: ["https://genlunamedchainhome.netlify.app", "http://localhost:5173", "http://localhost:3000"],
   credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   allowedHeaders: [
     "Content-Type",
     "Authorization",
@@ -41,6 +42,7 @@ app.use(cors({
     "x-message",
     "x-timestamp"
   ],
+  exposedHeaders: ["Access-Control-Allow-Origin"],
 }));
 app.use(express.json());
 // Attach user from wallet header when present (no hard auth requirement for reads)
