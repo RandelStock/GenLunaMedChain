@@ -1,11 +1,19 @@
 // backend/utils/emailService.js
 import nodemailer from 'nodemailer';
-import sgMail from '@sendgrid/mail';
 
-// Initialize SendGrid if API key is available
-if (process.env.SENDGRID_API_KEY) {
-  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
-  console.log('📧 SendGrid API initialized');
+// Safely import SendGrid with error handling
+let sgMail = null;
+try {
+  const sendgridModule = await import('@sendgrid/mail');
+  sgMail = sendgridModule.default;
+  
+  // Initialize SendGrid if API key is available
+  if (process.env.SENDGRID_API_KEY) {
+    sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+    console.log('📧 SendGrid API initialized');
+  }
+} catch (error) {
+  console.warn('⚠️ SendGrid module not available, will use fallback email method');
 }
 
 // Create email transporter using Gmail (fallback)
@@ -370,14 +378,15 @@ const emailTemplates = {
 export const sendEmail = async (to, subject, html) => {
   try {
     console.log('🔧 Email Configuration:');
-    console.log('  - Using SendGrid API:', !!process.env.SENDGRID_API_KEY);
+    console.log('  - SendGrid Available:', !!sgMail);
+    console.log('  - Using SendGrid API:', !!(process.env.SENDGRID_API_KEY && sgMail));
     console.log('  - From Email:', process.env.EMAIL_USER);
     console.log('  - To Email:', to);
     
     const fromEmail = process.env.EMAIL_USER;
     
     // Try SendGrid Web API first (recommended - doesn't use SMTP ports)
-    if (process.env.SENDGRID_API_KEY) {
+    if (process.env.SENDGRID_API_KEY && sgMail) {
       console.log('📧 Using SendGrid Web API for email delivery');
       
       const msg = {
@@ -426,7 +435,7 @@ export const sendEmail = async (to, subject, html) => {
     
     // SendGrid specific error handling
     if (error.response) {
-      console.error('  - SendGrid Response:', error.response.body);
+      console.error('  - SendGrid Response:', JSON.stringify(error.response.body));
     }
     
     return { 
