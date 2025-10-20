@@ -4,6 +4,7 @@ import { PrismaClient } from '@prisma/client';
 import { logAudit, getIpAddress, getUserAgent } from '../utils/auditLogger.js';
 import { getBarangayFilter, canModifyRecord } from '../middleware/baranggayAccess.js';
 import { optionalAuth } from '../middleware/auth.js';
+import { sendBookingConfirmation, sendConsultationConfirmed, sendConsultationCancelled } from '../utils/emailService.js';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -299,7 +300,6 @@ router.post('/', async (req, res, next) => {
       });
     }
     
-    
     // Check if the time slot is still available
     const availableSlots = await getAvailableTimeSlots(scheduled_date, assigned_doctor_id, assigned_nurse_id);
     const selectedSlot = availableSlots.find(slot => slot.time === scheduled_time);
@@ -337,6 +337,30 @@ router.post('/', async (req, res, next) => {
       }
     });
     
+    // Get provider details for email
+    const providerId = assigned_doctor_id || assigned_nurse_id;
+    let providerEmail = null;
+    let providerName = 'Healthcare Provider';
+    
+    if (providerId) {
+      const provider = await prisma.users.findUnique({
+        where: { user_id: parseInt(providerId) },
+        select: { email: true, full_name: true }
+      });
+      
+      if (provider) {
+        providerEmail = provider.email;
+        providerName = assigned_doctor_id ? `Dr. ${provider.full_name}` : `Nurse ${provider.full_name}`;
+      }
+    }
+    
+    // Send email notifications (async - don't wait for it)
+    sendBookingConfirmation(
+      { ...consultation, scheduled_time: scheduled_time }, // Use 12-hour format for email
+      providerEmail,
+      providerName
+    ).catch(err => console.error('Error sending booking confirmation emails:', err));
+    
     // Log audit
     await logAudit({
       tableName: 'consultations',
@@ -351,7 +375,7 @@ router.post('/', async (req, res, next) => {
     res.status(201).json({
       success: true,
       data: consultation,
-      message: 'Consultation scheduled successfully'
+      message: 'Consultation scheduled successfully. Confirmation emails have been sent.'
     });
   } catch (error) {
     console.error('Error creating consultation:', error);
@@ -533,6 +557,30 @@ router.put('/:id', async (req, res, next) => {
         }
       }
     });
+    
+    // Get provider name for email
+    let providerName = 'Healthcare Provider';
+    if (consultation.assigned_doctor) {
+      providerName = `Dr. ${consultation.assigned_doctor.full_name}`;
+    } else if (consultation.assigned_nurse) {
+      providerName = `Nurse ${consultation.assigned_nurse.full_name}`;
+    }
+    
+    // Send email notifications based on status change (async)
+    if (status && status !== oldConsultation.status) {
+      const consultationWithFormattedTime = {
+        ...consultation,
+        scheduled_time: formatTo12Hour(consultation.scheduled_time)
+      };
+      
+      if (status === 'CONFIRMED') {
+        sendConsultationConfirmed(consultationWithFormattedTime, providerName)
+          .catch(err => console.error('Error sending confirmation email:', err));
+      } else if (status === 'CANCELLED') {
+        sendConsultationCancelled(consultationWithFormattedTime, providerName)
+          .catch(err => console.error('Error sending cancellation email:', err));
+      }
+    }
     
     // Log audit
     await logAudit({
