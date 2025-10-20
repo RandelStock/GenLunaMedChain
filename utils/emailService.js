@@ -1,23 +1,39 @@
 // backend/utils/emailService.js
 import nodemailer from 'nodemailer';
 
-// Create email transporter
+// Create email transporter using SendGrid
 const createTransporter = () => {
-  return nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 587, // Use port 587 instead of service: 'gmail'
-    secure: false, // false for port 587
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASSWORD
-    },
-    tls: {
-      rejectUnauthorized: false
-    },
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 10000
-  });
+  // Check if SendGrid API key is available
+  if (process.env.SENDGRID_API_KEY) {
+    console.log('📧 Using SendGrid for email delivery');
+    return nodemailer.createTransport({
+      host: 'smtp.sendgrid.net',
+      port: 587,
+      secure: false,
+      auth: {
+        user: 'apikey', // This is literal 'apikey', don't change it
+        pass: process.env.SENDGRID_API_KEY
+      }
+    });
+  } else {
+    // Fallback to Gmail (might not work on Render)
+    console.log('⚠️ Using Gmail SMTP (may not work on cloud platforms)');
+    return nodemailer.createTransport({
+      host: 'smtp.gmail.com',
+      port: 587,
+      secure: false,
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASSWORD
+      },
+      tls: {
+        rejectUnauthorized: false
+      },
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 10000
+    });
+  }
 };
 
 // Email templates
@@ -363,8 +379,13 @@ export const sendEmail = async (to, subject, html) => {
   try {
     const transporter = createTransporter();
     
+    // Determine the FROM email based on which service is being used
+    const fromEmail = process.env.SENDGRID_API_KEY 
+      ? process.env.EMAIL_USER // Use your verified sender email with SendGrid
+      : process.env.EMAIL_USER; // Use Gmail email
+    
     const mailOptions = {
-      from: `GenLunaMedChain <${process.env.EMAIL_USER}>`,
+      from: `GenLunaMedChain <${fromEmail}>`,
       to: to,
       subject: subject,
       html: html
