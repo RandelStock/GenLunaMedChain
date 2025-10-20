@@ -21,7 +21,6 @@ import blockchainRoutes from "./routes/blockchain.js";
 import scheduleRoutes from "./routes/schedule.js";
 import consultationsRoutes from "./routes/consultations.js";
 import providerProfilesRoutes from "./routes/providerProfiles.js";
-import testEmailRoutes from "./routes/test-email.js";
 
 // Services
 import blockchainService from "./utils/blockchainUtils.js";  // ✅ Added
@@ -32,14 +31,8 @@ const app = express();
 const prisma = new PrismaClient();
 
 app.use(cors({
-  origin: [
-    "https://genlunamedchainhome.netlify.app",  // Your Netlify production URL
-    "http://localhost:5173",                     // Vite dev server
-    "http://localhost:3000",                     // Alternative dev server
-    "http://localhost:4173"                      // Vite preview
-  ],
+  origin: true,
   credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   allowedHeaders: [
     "Content-Type",
     "Authorization",
@@ -48,7 +41,6 @@ app.use(cors({
     "x-message",
     "x-timestamp"
   ],
-  exposedHeaders: ["Access-Control-Allow-Origin"],
 }));
 app.use(express.json());
 // Attach user from wallet header when present (no hard auth requirement for reads)
@@ -80,8 +72,6 @@ app.use("/blockchain", blockchainRoutes);
 app.use("/schedule", scheduleRoutes);
 app.use("/consultations", consultationsRoutes);
 app.use("/provider-profiles", providerProfilesRoutes);
-app.use("/test-email", testEmailRoutes);
-
 
 // Error handler
 app.use((err, req, res, next) => {
