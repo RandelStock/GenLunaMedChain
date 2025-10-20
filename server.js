@@ -31,7 +31,12 @@ const app = express();
 const prisma = new PrismaClient();
 
 app.use(cors({
-  origin: ["https://genlunamedchainhome.netlify.app", "http://localhost:5173", "http://localhost:3000"],
+  origin: [
+    "https://genlunamedchainhome.netlify.app",  // Your Netlify production URL
+    "http://localhost:5173",                     // Vite dev server
+    "http://localhost:3000",                     // Alternative dev server
+    "http://localhost:4173"                      // Vite preview
+  ],
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   allowedHeaders: [
