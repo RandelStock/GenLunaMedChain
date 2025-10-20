@@ -1,42 +1,34 @@
 // backend/utils/emailService.js
 import nodemailer from 'nodemailer';
+import sgMail from '@sendgrid/mail';
 
-// Create email transporter using SendGrid
-const createTransporter = () => {
-  // Check if SendGrid API key is available
-  if (process.env.SENDGRID_API_KEY) {
-    console.log('📧 Using SendGrid for email delivery');
-    return nodemailer.createTransport({
-      host: 'smtp.sendgrid.net',
-      port: 587,
-      secure: false,
-      auth: {
-        user: 'apikey', // This is literal 'apikey', don't change it
-        pass: process.env.SENDGRID_API_KEY
-      }
-    });
-  } else {
-    // Fallback to Gmail (might not work on Render)
-    console.log('⚠️ Using Gmail SMTP (may not work on cloud platforms)');
-    return nodemailer.createTransport({
-      host: 'smtp.gmail.com',
-      port: 587,
-      secure: false,
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASSWORD
-      },
-      tls: {
-        rejectUnauthorized: false
-      },
-      connectionTimeout: 10000,
-      greetingTimeout: 10000,
-      socketTimeout: 10000
-    });
-  }
+// Initialize SendGrid if API key is available
+if (process.env.SENDGRID_API_KEY) {
+  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+  console.log('📧 SendGrid API initialized');
+}
+
+// Create email transporter using Gmail (fallback)
+const createGmailTransporter = () => {
+  console.log('⚠️ Using Gmail SMTP (may not work on cloud platforms)');
+  return nodemailer.createTransport({
+    host: 'smtp.gmail.com',
+    port: 587,
+    secure: false,
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASSWORD
+    },
+    tls: {
+      rejectUnauthorized: false
+    },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 10000
+  });
 };
 
-// Email templates
+// Email templates (keeping your existing templates)
 const emailTemplates = {
   // Patient: New booking confirmation
   patientBookingConfirmation: (consultation, providerName) => ({
@@ -374,29 +366,75 @@ const emailTemplates = {
   })
 };
 
-// Send email function
+// Send email function using SendGrid Web API (preferred) or fallback to SMTP
 export const sendEmail = async (to, subject, html) => {
   try {
-    const transporter = createTransporter();
+    console.log('🔧 Email Configuration:');
+    console.log('  - Using SendGrid API:', !!process.env.SENDGRID_API_KEY);
+    console.log('  - From Email:', process.env.EMAIL_USER);
+    console.log('  - To Email:', to);
     
-    // Determine the FROM email based on which service is being used
-    const fromEmail = process.env.SENDGRID_API_KEY 
-      ? process.env.EMAIL_USER // Use your verified sender email with SendGrid
-      : process.env.EMAIL_USER; // Use Gmail email
+    const fromEmail = process.env.EMAIL_USER;
     
-    const mailOptions = {
-      from: `GenLunaMedChain <${fromEmail}>`,
-      to: to,
-      subject: subject,
-      html: html
-    };
+    // Try SendGrid Web API first (recommended - doesn't use SMTP ports)
+    if (process.env.SENDGRID_API_KEY) {
+      console.log('📧 Using SendGrid Web API for email delivery');
+      
+      const msg = {
+        to: to,
+        from: fromEmail, // Must be verified in SendGrid
+        subject: subject,
+        html: html,
+      };
 
-    const info = await transporter.sendMail(mailOptions);
-    console.log('✅ Email sent successfully:', info.messageId);
-    return { success: true, messageId: info.messageId };
+      const response = await sgMail.send(msg);
+      console.log('✅ Email sent via SendGrid API');
+      console.log('📊 Response status:', response[0].statusCode);
+      
+      return { 
+        success: true, 
+        messageId: response[0].headers['x-message-id'],
+        provider: 'sendgrid-api'
+      };
+    } 
+    // Fallback to Gmail SMTP
+    else {
+      console.log('📧 Using Gmail SMTP (fallback)');
+      const transporter = createGmailTransporter();
+      
+      const mailOptions = {
+        from: `GenLunaMedChain <${fromEmail}>`,
+        to: to,
+        subject: subject,
+        html: html
+      };
+
+      const info = await transporter.sendMail(mailOptions);
+      console.log('✅ Email sent via Gmail SMTP:', info.messageId);
+      
+      return { 
+        success: true, 
+        messageId: info.messageId,
+        provider: 'gmail-smtp'
+      };
+    }
   } catch (error) {
     console.error('❌ Error sending email:', error);
-    return { success: false, error: error.message };
+    console.error('📋 Error details:');
+    console.error('  - Message:', error.message);
+    console.error('  - Code:', error.code);
+    
+    // SendGrid specific error handling
+    if (error.response) {
+      console.error('  - SendGrid Response:', error.response.body);
+    }
+    
+    return { 
+      success: false, 
+      error: error.message, 
+      code: error.code,
+      details: error.response?.body
+    };
   }
 };
 
