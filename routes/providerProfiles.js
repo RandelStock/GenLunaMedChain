@@ -407,10 +407,10 @@ router.post('/:id/availability', optionalAuth, async (req, res, next) => {
  * DELETE /api/provider-profiles/:id/availability/:day
  * Remove provider availability for a specific day
  */
-router.delete('/:id/availability/:day', optionalAuth, async (req, res, next) => {
+router.delete('/:id/availability/:dayOfWeek', optionalAuth, async (req, res, next) => {
   try {
     const providerId = parseInt(req.params.id);
-    const dayOfWeek = parseInt(req.params.day);
+    const dayOfWeek = parseInt(req.params.dayOfWeek);
     const user = req.user;
     
     if (isNaN(providerId) || isNaN(dayOfWeek)) {
@@ -544,7 +544,6 @@ router.delete('/:id/specializations/:specializationId', optionalAuth, async (req
     next(error);
   }
 });
-
 /**
  * GET /api/provider-profiles/:id/available-slots
  * Get available time slots for a provider on a specific date
