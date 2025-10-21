@@ -30,10 +30,9 @@ import { optionalAuth } from "./middleware/auth.js";
 const app = express();
 const prisma = new PrismaClient();
 
-// ✅ FIXED: Added PATCH and OPTIONS methods
 app.use(cors({
-  origin: ["https://genlunamedchainhome.netlify.app", "http://localhost:3000"], // Added localhost for development
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], // ✅ Added PATCH and OPTIONS
+  origin: ["https://genlunamedchainhome.netlify.app"],
+  methods: ["GET", "POST", "PATCH","PUT", "DELETE"],
   credentials: true,
   allowedHeaders: [
     "Content-Type",
