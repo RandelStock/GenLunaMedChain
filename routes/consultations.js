@@ -500,6 +500,62 @@ router.get('/:id', async (req, res, next) => {
 });
 
 /**
+ * GET /api/consultations/stats/summary
+ * Get consultation statistics summary
+ */
+router.get('/stats/summary', async (req, res, next) => {
+  try {
+    const user = req.user || null;
+    const barangayFilter = getBarangayFilter(user);
+    
+    const [
+      totalConsultations,
+      scheduledConsultations,
+      completedConsultations,
+      cancelledConsultations,
+      todayConsultations,
+      upcomingConsultations
+    ] = await Promise.all([
+      prisma.consultations.count({ where: barangayFilter }),
+      prisma.consultations.count({ where: { ...barangayFilter, status: 'SCHEDULED' } }),
+      prisma.consultations.count({ where: { ...barangayFilter, status: 'COMPLETED' } }),
+      prisma.consultations.count({ where: { ...barangayFilter, status: 'CANCELLED' } }),
+      prisma.consultations.count({
+        where: {
+          ...barangayFilter,
+          scheduled_date: {
+            gte: new Date(new Date().setHours(0, 0, 0, 0)),
+            lt: new Date(new Date().setHours(23, 59, 59, 999))
+          }
+        }
+      }),
+      prisma.consultations.count({
+        where: {
+          ...barangayFilter,
+          scheduled_date: { gt: new Date() },
+          status: { in: ['SCHEDULED', 'CONFIRMED'] }
+        }
+      })
+    ]);
+    
+    res.json({
+      success: true,
+      stats: {
+        totalConsultations,
+        scheduledConsultations,
+        completedConsultations,
+        cancelledConsultations,
+        todayConsultations,
+        upcomingConsultations
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching consultation stats:', error);
+    next(error);
+  }
+});
+
+/**
  * PUT /api/consultations/:id
  * Update consultation status or details
  */
@@ -605,60 +661,6 @@ router.put('/:id', async (req, res, next) => {
   }
 });
 
-/**
- * GET /api/consultations/stats/summary
- * Get consultation statistics summary
- */
-router.get('/stats/summary', async (req, res, next) => {
-  try {
-    const user = req.user || null;
-    const barangayFilter = getBarangayFilter(user);
-    
-    const [
-      totalConsultations,
-      scheduledConsultations,
-      completedConsultations,
-      cancelledConsultations,
-      todayConsultations,
-      upcomingConsultations
-    ] = await Promise.all([
-      prisma.consultations.count({ where: barangayFilter }),
-      prisma.consultations.count({ where: { ...barangayFilter, status: 'SCHEDULED' } }),
-      prisma.consultations.count({ where: { ...barangayFilter, status: 'COMPLETED' } }),
-      prisma.consultations.count({ where: { ...barangayFilter, status: 'CANCELLED' } }),
-      prisma.consultations.count({
-        where: {
-          ...barangayFilter,
-          scheduled_date: {
-            gte: new Date(new Date().setHours(0, 0, 0, 0)),
-            lt: new Date(new Date().setHours(23, 59, 59, 999))
-          }
-        }
-      }),
-      prisma.consultations.count({
-        where: {
-          ...barangayFilter,
-          scheduled_date: { gt: new Date() },
-          status: { in: ['SCHEDULED', 'CONFIRMED'] }
-        }
-      })
-    ]);
-    
-    res.json({
-      success: true,
-      stats: {
-        totalConsultations,
-        scheduledConsultations,
-        completedConsultations,
-        cancelledConsultations,
-        todayConsultations,
-        upcomingConsultations
-      }
-    });
-  } catch (error) {
-    console.error('Error fetching consultation stats:', error);
-    next(error);
-  }
-});
+
 
 export default router;
