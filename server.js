@@ -7,7 +7,7 @@ dotenv.config();
 // Import routes
 import residentsRoutes from "./routes/residents.js";
 import medicinesRoutes from "./routes/medicines.js";
-import stocksRoutes from "./routes/stocks.js";  
+import stocksRoutes from "./routes/stocks.js";
 import suppliersRoutes from "./routes/suppliers.js";
 import syncRoutes from "./routes/sync.js";
 import releasesRoutes from "./routes/releases.js";
