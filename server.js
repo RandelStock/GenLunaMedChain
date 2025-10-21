@@ -7,7 +7,7 @@ dotenv.config();
 // Import routes
 import residentsRoutes from "./routes/residents.js";
 import medicinesRoutes from "./routes/medicines.js";
-import stocksRoutes from "./routes/stocks.js";
+import stocksRoutes from "./routes/stocks.js";  
 import suppliersRoutes from "./routes/suppliers.js";
 import syncRoutes from "./routes/sync.js";
 import releasesRoutes from "./routes/releases.js";
@@ -30,9 +30,10 @@ import { optionalAuth } from "./middleware/auth.js";
 const app = express();
 const prisma = new PrismaClient();
 
+// ✅ FIXED: Added PATCH and OPTIONS methods
 app.use(cors({
-  origin: ["https://genlunamedchainhome.netlify.app"],
-  methods: ["GET", "POST", "PUT", "DELETE"],
+  origin: ["https://genlunamedchainhome.netlify.app", "http://localhost:3000"], // Added localhost for development
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], // ✅ Added PATCH and OPTIONS
   credentials: true,
   allowedHeaders: [
     "Content-Type",
@@ -42,7 +43,11 @@ app.use(cors({
     "x-message",
     "x-timestamp",
   ],
+  optionsSuccessStatus: 200 // ✅ Added for legacy browser support
 }));
+
+// ✅ Handle preflight requests explicitly
+app.options('*', cors());
 
 app.use(express.json());
 // Attach user from wallet header when present (no hard auth requirement for reads)
