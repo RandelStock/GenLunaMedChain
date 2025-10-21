@@ -31,7 +31,8 @@ const app = express();
 const prisma = new PrismaClient();
 
 app.use(cors({
-  origin: true,
+  origin: ["https://genlunamedchainhome.netlify.app"],
+  methods: ["GET", "POST", "PUT", "DELETE"],
   credentials: true,
   allowedHeaders: [
     "Content-Type",
@@ -39,9 +40,10 @@ app.use(cors({
     "x-wallet-address",
     "x-signature",
     "x-message",
-    "x-timestamp"
+    "x-timestamp",
   ],
 }));
+
 app.use(express.json());
 // Attach user from wallet header when present (no hard auth requirement for reads)
 app.use(optionalAuth);
@@ -94,7 +96,7 @@ prisma.$connect()
 
 const PORT = process.env.PORT || 4000;
 const server = app.listen(PORT, () => {
-  console.log(`✅ API running on http://localhost:${PORT}`);
+  console.log(`✅ API running on port ${PORT}`);
   console.log(
     `📊 Database: ${
       process.env.DATABASE_URL?.split("@")[1]?.split("/")[1] || "PostgreSQL"
