@@ -376,6 +376,7 @@ router.post('/:id/availability', optionalAuth, async (req, res, next) => {
         break_end_time,
         slot_duration: slot_duration || 30,
         max_consultations: max_consultations || 10,
+        is_active: true, // FIX: Reactivate the record when updating
         updated_at: new Date()
       },
       create: {
@@ -386,7 +387,8 @@ router.post('/:id/availability', optionalAuth, async (req, res, next) => {
         break_start_time,
         break_end_time,
         slot_duration: slot_duration || 30,
-        max_consultations: max_consultations || 10
+        max_consultations: max_consultations || 10,
+        is_active: true // Ensure new records are active
       }
     });
     
@@ -641,4 +643,4 @@ router.get('/:id/available-slots', async (req, res, next) => {
   }
 });
 
-export default router;
+export default router;  
