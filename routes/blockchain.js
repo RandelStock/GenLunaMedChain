@@ -18,7 +18,7 @@ try {
   const abiPath = join(__dirname, "../abi/ContractABI.json");
   if (fs.existsSync(abiPath)) {
     const contractJson = JSON.parse(fs.readFileSync(abiPath, "utf8"));
-    contractABI = contractJson.abi || contractJson; // handles both full JSON and ABI-only
+    contractABI = contractJson.abi || contractJson;
     contractAddress = process.env.CONTRACT_ADDRESS;
     console.log("✅ Loaded ABI from abi/ContractABI.json");
   } else {
@@ -32,10 +32,12 @@ try {
 let provider, contract;
 
 try {
-  if (contractABI && contractAddress && process.env.RPC_URL) {
-    provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
+  if (contractABI && contractAddress && (process.env.RPC_URL || process.env.BLOCKCHAIN_RPC_URL)) {
+    const rpcUrl = process.env.RPC_URL || process.env.BLOCKCHAIN_RPC_URL;
+    provider = new ethers.JsonRpcProvider(rpcUrl);
     contract = new ethers.Contract(contractAddress, contractABI, provider);
     console.log("✅ Blockchain contract initialized successfully");
+    console.log("📡 RPC URL:", rpcUrl);
   } else {
     console.warn("⚠️ Blockchain contract not initialized. Missing ABI, address, or RPC URL.");
   }
@@ -52,6 +54,7 @@ function generateHash(data) {
  * ----------------------------------------------------------------
  * GET /blockchain/hashes
  * Fetches all hashes stored on the blockchain
+ * OPTIMIZED: Only fetch recent blocks to avoid timeout
  * ----------------------------------------------------------------
  */
 router.get("/hashes", async (req, res, next) => {
@@ -65,19 +68,28 @@ router.get("/hashes", async (req, res, next) => {
 
     const allHashes = [];
 
+    // ✅ Get current block to calculate block range
+    const currentBlock = await provider.getBlockNumber();
+    // Only fetch last 10,000 blocks (~1-2 days on Polygon) to avoid timeout
+    const fromBlock = Math.max(0, currentBlock - 10000);
+    
+    console.log(`📊 Fetching events from block ${fromBlock} to ${currentBlock}`);
+
     // Helper: get unique ids from events for a given event set and map to latest tx
     async function getIdsAndLatestTx(eventNames) {
       const idsToLatestTx = new Map();
       for (const { name, filterFactory } of eventNames) {
         if (!contract.filters[name]) continue;
-        // Query all events of this type from block 0
-        const filter = filterFactory ? filterFactory() : contract.filters[name]();
-        const events = await contract.queryFilter(filter, 0, "latest");
-        for (const ev of events) {
-          const id = Number(ev.args?.[0]);
-          if (!Number.isFinite(id)) continue;
-          // Keep the txHash of the most recent occurrence we see while scanning forward
-          idsToLatestTx.set(id, ev.transactionHash);
+        try {
+          const filter = filterFactory ? filterFactory() : contract.filters[name]();
+          const events = await contract.queryFilter(filter, fromBlock, "latest");
+          for (const ev of events) {
+            const id = Number(ev.args?.[0]);
+            if (!Number.isFinite(id)) continue;
+            idsToLatestTx.set(id, ev.transactionHash);
+          }
+        } catch (err) {
+          console.error(`Error fetching ${name}:`, err.message);
         }
       }
       return idsToLatestTx;
@@ -102,7 +114,7 @@ router.get("/hashes", async (req, res, next) => {
           txHash: latestTxHash,
         });
       } catch (err) {
-        console.error(`Error fetching medicine hash ${id}:`, err);
+        console.error(`Error fetching medicine hash ${id}:`, err.message);
       }
     }
 
@@ -125,13 +137,17 @@ router.get("/hashes", async (req, res, next) => {
           txHash: latestTxHash,
         });
       } catch (err) {
-        console.error(`Error fetching stock hash ${id}:`, err);
+        console.error(`Error fetching stock hash ${id}:`, err.message);
       }
     }
 
     // RECEIPT - include each event (store/update/delete) as its own history row
     try {
-      const storedEvents = await contract.queryFilter(contract.filters.ReceiptHashStored(null), 0, "latest");
+      const storedEvents = await contract.queryFilter(
+        contract.filters.ReceiptHashStored(null), 
+        fromBlock, 
+        "latest"
+      );
       for (const ev of storedEvents) {
         const id = Number(ev.args?.[0]);
         const dataHash = ev.args?.[1];
@@ -148,7 +164,11 @@ router.get("/hashes", async (req, res, next) => {
         });
       }
 
-      const updatedEvents = await contract.queryFilter(contract.filters.ReceiptHashUpdated(null), 0, "latest");
+      const updatedEvents = await contract.queryFilter(
+        contract.filters.ReceiptHashUpdated(null), 
+        fromBlock, 
+        "latest"
+      );
       for (const ev of updatedEvents) {
         const id = Number(ev.args?.[0]);
         const newHash = ev.args?.[2];
@@ -165,29 +185,57 @@ router.get("/hashes", async (req, res, next) => {
         });
       }
 
-      const deletedEvents = await contract.queryFilter(contract.filters.ReceiptHashDeleted(null), 0, "latest");
-      // Helper to find the most recent hash BEFORE deletion
-      async function getLastReceiptHashBefore(id, blockNumber) {
-        const updates = await contract.queryFilter(contract.filters.ReceiptHashUpdated(id), 0, blockNumber);
-        const stores = await contract.queryFilter(contract.filters.ReceiptHashStored(id), 0, blockNumber);
-        const candidates = [];
-        for (const e of updates) candidates.push({ blockNumber: e.blockNumber, logIndex: e.index, hash: e.args?.[2] });
-        for (const e of stores) candidates.push({ blockNumber: e.blockNumber, logIndex: e.index, hash: e.args?.[1] });
-        if (candidates.length === 0) return null;
-        candidates.sort((a, b) => a.blockNumber !== b.blockNumber ? a.blockNumber - b.blockNumber : a.logIndex - b.logIndex);
-        return candidates[candidates.length - 1].hash || null;
-      }
-
+      const deletedEvents = await contract.queryFilter(
+        contract.filters.ReceiptHashDeleted(null), 
+        fromBlock, 
+        "latest"
+      );
+      
       for (const ev of deletedEvents) {
         const id = Number(ev.args?.[0]);
         const removedBy = ev.args?.[1];
         const ts = Number(ev.args?.[2]);
+        
+        // Try to get the last known hash before deletion
         let priorHash = null;
         try {
-          priorHash = await getLastReceiptHashBefore(id, ev.blockNumber);
+          const updates = await contract.queryFilter(
+            contract.filters.ReceiptHashUpdated(id), 
+            fromBlock, 
+            ev.blockNumber
+          );
+          const stores = await contract.queryFilter(
+            contract.filters.ReceiptHashStored(id), 
+            fromBlock, 
+            ev.blockNumber
+          );
+          const candidates = [];
+          for (const e of updates) {
+            candidates.push({ 
+              blockNumber: e.blockNumber, 
+              logIndex: e.index, 
+              hash: e.args?.[2] 
+            });
+          }
+          for (const e of stores) {
+            candidates.push({ 
+              blockNumber: e.blockNumber, 
+              logIndex: e.index, 
+              hash: e.args?.[1] 
+            });
+          }
+          if (candidates.length > 0) {
+            candidates.sort((a, b) => 
+              a.blockNumber !== b.blockNumber 
+                ? a.blockNumber - b.blockNumber 
+                : a.logIndex - b.logIndex
+            );
+            priorHash = candidates[candidates.length - 1].hash || null;
+          }
         } catch (e) {
-          // swallow
+          // If we can't find it, that's ok
         }
+        
         allHashes.push({
           type: "receipt",
           recordId: id,
@@ -199,7 +247,7 @@ router.get("/hashes", async (req, res, next) => {
         });
       }
     } catch (err) {
-      console.error("Error fetching receipt events:", err);
+      console.error("Error fetching receipt events:", err.message);
     }
 
     // REMOVAL
@@ -221,16 +269,23 @@ router.get("/hashes", async (req, res, next) => {
           txHash: latestTxHash,
         });
       } catch (err) {
-        console.error(`Error fetching removal hash ${id}:`, err);
+        console.error(`Error fetching removal hash ${id}:`, err.message);
       }
     }
 
     // ✅ Sort newest first
     allHashes.sort((a, b) => b.timestamp - a.timestamp);
 
+    console.log(`✅ Fetched ${allHashes.length} blockchain hashes successfully`);
+
     res.json({
       success: true,
       hashes: allHashes,
+      blockRange: {
+        from: fromBlock,
+        to: currentBlock,
+        blocksScanned: currentBlock - fromBlock
+      },
       counts: {
         total: allHashes.length,
         medicines: allHashes.filter((h) => h.type === "medicine").length,
@@ -240,7 +295,7 @@ router.get("/hashes", async (req, res, next) => {
       },
     });
   } catch (error) {
-    console.error("Error fetching blockchain hashes:", error);
+    console.error("❌ Error fetching blockchain hashes:", error);
     next(error);
   }
 });
