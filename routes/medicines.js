@@ -574,9 +574,49 @@ router.delete('/:id', async (req, res) => {
     });
     // ===== END AUDIT LOG =====
 
+    // ===== BLOCKCHAIN DELETE & TX LOG =====
+    let blockchainTxHash = null;
+    try {
+      // Use backend wallet to perform blockchain delete; avoids MetaMask issues
+      const { default: blockchainService } = await import('../utils/blockchainUtils.js');
+      const tx = await blockchainService.contract.deleteMedicineHash(medicineId);
+      const receipt = await tx.wait();
+      blockchainTxHash = receipt.hash;
+
+      // Update medicine record with tx hash (even though soft-deleted)
+      await prisma.medicine_records.update({
+        where: { medicine_id: medicineId },
+        data: {
+          blockchain_tx_hash: blockchainTxHash,
+          last_synced_at: new Date()
+        }
+      });
+
+      // Log blockchain transaction for history page
+      await prisma.blockchain_transactions.create({
+        data: {
+          tx_hash: receipt.hash,
+          block_number: BigInt(receipt.blockNumber),
+          contract_address: process.env.CONTRACT_ADDRESS,
+          action_type: 'DELETE',
+          entity_type: 'MEDICINE',
+          entity_id: medicineId,
+          from_address: blockchainService.wallet.address,
+          status: 'CONFIRMED',
+          confirmed_at: new Date(),
+          event_data: { timestamp: Math.floor(Date.now() / 1000) }
+        }
+      });
+    } catch (bcErr) {
+      console.error('Blockchain delete failed:', bcErr.message);
+      // Continue without failing the delete; surface info to client
+    }
+    // ===== END BLOCKCHAIN DELETE & TX LOG =====
+
     res.json({
       success: true,
-      message: 'Medicine deleted successfully'
+      message: 'Medicine deleted successfully',
+      blockchain_tx_hash: blockchainTxHash || null
     });
 
   } catch (error) {
