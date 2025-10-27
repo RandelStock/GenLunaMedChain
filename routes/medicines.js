@@ -489,9 +489,10 @@ router.put('/:id', async (req, res) => {
         record_id: medicineId,
         old_values: existingMedicine, // Store old values
         new_values: medicine, // Store new values
-        changed_by_wallet: req.body.wallet_address || null,
-        changed_by_user_id: user?.user_id || null,
-        changed_at: new Date()
+        changed_by_wallet: req.body.wallet_address || req.headers['x-wallet-address'] || null,
+        changed_by: user?.user_id || null,
+        changed_at: new Date(),
+        medicine_id: medicineId
       }
     });
     // ===== END AUDIT LOG =====
@@ -565,9 +566,10 @@ router.delete('/:id', async (req, res) => {
         record_id: medicineId,
         old_values: existingMedicine, // Store the deleted record
         new_values: null, // No new values for delete
-        changed_by_wallet: req.body.wallet_address || null,
-        changed_by_user_id: user?.user_id || null,
-        changed_at: new Date()
+        changed_by_wallet: req.headers['x-wallet-address'] || null,
+        changed_by: user?.user_id || null,
+        changed_at: new Date(),
+        medicine_id: medicineId
       }
     });
     // ===== END AUDIT LOG =====
