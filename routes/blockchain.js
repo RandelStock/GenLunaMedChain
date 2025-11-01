@@ -5,6 +5,10 @@ import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import fs from "fs";
 import prisma from "../config/prismaClient.js";
+import NodeCache from "node-cache";
+
+// Initialize cache with 5 minute TTL
+const hashCache = new NodeCache({ stdTTL: 300 });
 
 const router = express.Router();
 
