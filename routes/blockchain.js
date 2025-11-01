@@ -20,7 +20,7 @@ const __dirname = dirname(__filename);
 let contractABI, contractAddress;
 
 try {
-  const abiPath = join(__dirname, "../abi/ContractABI.json");
+  const abiPath = path.join(__dirname, "../abi/ContractABI.json");
   if (fs.existsSync(abiPath)) {
     const contractJson = JSON.parse(fs.readFileSync(abiPath, "utf8"));
     contractABI = contractJson.abi || contractJson;
