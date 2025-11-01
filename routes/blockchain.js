@@ -72,23 +72,34 @@ router.get("/hashes", async (req, res, next) => {
       console.log("📊 Returning cached blockchain hashes");
       return res.json({
         success: true,
-        data: cachedHashes
+        hashes: cachedHashes,
+        counts: calculateCounts(cachedHashes)
       });
     }
     
     console.log("📊 Fetching blockchain hashes from database");
-    console.log("🔍 DATABASE_URL contains:", process.env.DATABASE_URL?.includes('neon') ? '✅ NEON' : '❌ NOT NEON');
     
     const allHashes = [];
     
     // Fetch medicine hashes from database
     const medicineHashes = await prisma.medicine_records.findMany({
+      where: {
+        blockchain_hash: {
+          not: null
+        }
+      },
       select: {
         medicine_id: true,
         blockchain_hash: true,
-        created_by: true,
+        blockchain_tx_hash: true,
         created_at: true,
-        blockchain_tx_hash: true
+        created_by: true,
+        created_by_user: {
+          select: {
+            wallet_address: true,
+            full_name: true
+          }
+        }
       }
     });
     
@@ -97,8 +108,9 @@ router.get("/hashes", async (req, res, next) => {
         type: "medicine",
         recordId: record.medicine_id,
         hash: record.blockchain_hash,
-        addedBy: record.created_by,
-        timestamp: new Date(record.created_at).getTime(),
+        addedBy: record.created_by_user?.wallet_address || "Unknown",
+        addedByName: record.created_by_user?.full_name || "Unknown",
+        timestamp: Math.floor(new Date(record.created_at).getTime() / 1000),
         exists: true,
         txHash: record.blockchain_tx_hash || ""
       });
@@ -106,12 +118,23 @@ router.get("/hashes", async (req, res, next) => {
     
     // Fetch stock hashes from database
     const stockHashes = await prisma.medicine_stocks.findMany({
+      where: {
+        blockchain_hash: {
+          not: null
+        }
+      },
       select: {
         stock_id: true,
         blockchain_hash: true,
-        created_by: true,
+        blockchain_tx_hash: true,
         created_at: true,
-        blockchain_tx_hash: true
+        added_by_user_id: true,
+        added_by_user: {
+          select: {
+            wallet_address: true,
+            full_name: true
+          }
+        }
       }
     });
     
@@ -120,8 +143,9 @@ router.get("/hashes", async (req, res, next) => {
         type: "stock",
         recordId: record.stock_id,
         hash: record.blockchain_hash,
-        addedBy: record.created_by,
-        timestamp: new Date(record.created_at).getTime(),
+        addedBy: record.added_by_user?.wallet_address || "Unknown",
+        addedByName: record.added_by_user?.full_name || "Unknown",
+        timestamp: Math.floor(new Date(record.created_at).getTime() / 1000),
         exists: true,
         txHash: record.blockchain_tx_hash || ""
       });
@@ -129,12 +153,23 @@ router.get("/hashes", async (req, res, next) => {
     
     // Fetch receipt hashes from database
     const receiptHashes = await prisma.medicine_releases.findMany({
+      where: {
+        blockchain_hash: {
+          not: null
+        }
+      },
       select: {
         release_id: true,
         blockchain_hash: true,
-        created_by: true,
+        blockchain_tx_hash: true,
         created_at: true,
-        blockchain_tx_hash: true
+        released_by_user_id: true,
+        released_by_user: {
+          select: {
+            wallet_address: true,
+            full_name: true
+          }
+        }
       }
     });
     
@@ -143,8 +178,9 @@ router.get("/hashes", async (req, res, next) => {
         type: "receipt",
         recordId: record.release_id,
         hash: record.blockchain_hash,
-        addedBy: record.created_by,
-        timestamp: new Date(record.created_at).getTime(),
+        addedBy: record.released_by_user?.wallet_address || "Unknown",
+        addedByName: record.released_by_user?.full_name || "Unknown",
+        timestamp: Math.floor(new Date(record.created_at).getTime() / 1000),
         exists: true,
         txHash: record.blockchain_tx_hash || ""
       });
@@ -152,12 +188,23 @@ router.get("/hashes", async (req, res, next) => {
     
     // Fetch removal hashes from database
     const removalHashes = await prisma.stock_removals.findMany({
+      where: {
+        blockchain_hash: {
+          not: null
+        }
+      },
       select: {
         removal_id: true,
         blockchain_hash: true,
-        created_by: true,
+        blockchain_tx_hash: true,
         created_at: true,
-        blockchain_tx_hash: true
+        removed_by_user_id: true,
+        removed_by_user: {
+          select: {
+            wallet_address: true,
+            full_name: true
+          }
+        }
       }
     });
     
@@ -166,32 +213,9 @@ router.get("/hashes", async (req, res, next) => {
         type: "removal",
         recordId: record.removal_id,
         hash: record.blockchain_hash,
-        addedBy: record.created_by,
-        timestamp: new Date(record.created_at).getTime(),
-        exists: true,
-        txHash: record.blockchain_tx_hash || ""
-      });
-    }
-    
-    // Fetch staff hashes from database
-    // Note: staff_records model doesn't exist in the schema, using users model instead
-    const staffHashes = await prisma.users.findMany({
-      select: {
-        user_id: true,
-        blockchain_hash: true,
-        created_by: true,
-        created_at: true,
-        blockchain_tx_hash: true
-      }
-    });
-    
-    for (const record of staffHashes) {
-      allHashes.push({
-        type: "staff",
-        recordId: record.user_id,
-        hash: record.blockchain_hash,
-        addedBy: record.created_by,
-        timestamp: new Date(record.created_at).getTime(),
+        addedBy: record.removed_by_user?.wallet_address || "Unknown",
+        addedByName: record.removed_by_user?.full_name || "Unknown",
+        timestamp: Math.floor(new Date(record.created_at).getTime() / 1000),
         exists: true,
         txHash: record.blockchain_tx_hash || ""
       });
@@ -208,15 +232,8 @@ router.get("/hashes", async (req, res, next) => {
     // Return the results
     return res.json({
       success: true,
-      data: allHashes,
-      counts: {
-        total: allHashes.length,
-        medicines: allHashes.filter((h) => h.type === "medicine").length,
-        stocks: allHashes.filter((h) => h.type === "stock").length,
-        receipts: allHashes.filter((h) => h.type === "receipt").length,
-        removals: allHashes.filter((h) => h.type === "removal").length,
-        staff: allHashes.filter((h) => h.type === "staff").length,
-      }
+      hashes: allHashes,
+      counts: calculateCounts(allHashes)
     });
   } catch (error) {
     console.error("❌ Error fetching blockchain hashes from database:", error);
@@ -228,21 +245,26 @@ router.get("/hashes", async (req, res, next) => {
   }
 });
 
+// Helper function to calculate counts
+function calculateCounts(hashes) {
+  return {
+    total: hashes.length,
+    medicines: hashes.filter((h) => h.type === "medicine").length,
+    stocks: hashes.filter((h) => h.type === "stock").length,
+    receipts: hashes.filter((h) => h.type === "receipt").length,
+    removals: hashes.filter((h) => h.type === "removal").length
+  };
+}
+
 /**
  * ----------------------------------------------------------------
  * POST /blockchain/verify
- * Verifies if a hash on blockchain matches the database record
+ * Verifies if a hash matches the one stored in database
+ * (Can optionally verify against blockchain if needed)
  * ----------------------------------------------------------------
  */
 router.post("/verify", async (req, res, next) => {
   try {
-    if (!contract) {
-      return res.status(503).json({
-        success: false,
-        error: "Blockchain service not available. Contract not initialized.",
-      });
-    }
-
     const { recordId, type, hash } = req.body;
     if (!recordId || !type || !hash) {
       return res.status(400).json({
@@ -251,27 +273,51 @@ router.post("/verify", async (req, res, next) => {
       });
     }
 
-    let blockchainHash, exists;
+    let dbHash = null;
+    let exists = false;
+
+    // Fetch from database based on type
     switch (type) {
       case "medicine":
-        [blockchainHash, , , exists] = await contract.getMedicineHash(recordId);
+        const medicine = await prisma.medicine_records.findUnique({
+          where: { medicine_id: parseInt(recordId) },
+          select: { blockchain_hash: true, is_active: true }
+        });
+        dbHash = medicine?.blockchain_hash;
+        exists = medicine?.is_active || false;
         break;
+      
       case "stock":
-        [blockchainHash, , , exists] = await contract.getStockHash(recordId);
+        const stock = await prisma.medicine_stocks.findUnique({
+          where: { stock_id: parseInt(recordId) },
+          select: { blockchain_hash: true, is_active: true }
+        });
+        dbHash = stock?.blockchain_hash;
+        exists = stock?.is_active || false;
         break;
+      
       case "receipt":
-        [blockchainHash, , , exists] = await contract.getReceiptHash(recordId);
+        const receipt = await prisma.medicine_releases.findUnique({
+          where: { release_id: parseInt(recordId) },
+          select: { blockchain_hash: true }
+        });
+        dbHash = receipt?.blockchain_hash;
+        exists = !!receipt;
         break;
+      
       case "removal":
-        [blockchainHash, , , exists] = await contract.getRemovalHash(recordId);
+        const removal = await prisma.stock_removals.findUnique({
+          where: { removal_id: parseInt(recordId) },
+          select: { blockchain_hash: true }
+        });
+        dbHash = removal?.blockchain_hash;
+        exists = !!removal;
         break;
-      case "staff":
-        [blockchainHash, , , exists] = await contract.getStaffHash(recordId);
-        break;
+      
       default:
         return res.status(400).json({
           success: false,
-          error: "Invalid type. Must be: medicine, stock, receipt, removal, or staff",
+          error: "Invalid type. Must be: medicine, stock, receipt, or removal",
         });
     }
 
@@ -279,15 +325,24 @@ router.post("/verify", async (req, res, next) => {
       return res.json({
         success: true,
         verified: false,
-        message: "Record does not exist on blockchain",
+        message: "Record does not exist in database",
       });
     }
 
-    const verified = blockchainHash.toLowerCase() === hash.toLowerCase();
+    if (!dbHash) {
+      return res.json({
+        success: true,
+        verified: false,
+        message: "No blockchain hash found for this record",
+      });
+    }
+
+    const verified = dbHash.toLowerCase() === hash.toLowerCase();
+    
     res.json({
       success: true,
       verified,
-      blockchainHash,
+      databaseHash: dbHash,
       providedHash: hash,
       message: verified
         ? "Hash verification successful - data integrity confirmed"
@@ -302,49 +357,119 @@ router.post("/verify", async (req, res, next) => {
 /**
  * ----------------------------------------------------------------
  * GET /blockchain/record/:type/:id
- * Fetch specific record hash from blockchain
+ * Fetch specific record hash from database
  * ----------------------------------------------------------------
  */
 router.get("/record/:type/:id", async (req, res, next) => {
   try {
-    if (!contract) {
-      return res.status(503).json({
-        success: false,
-        error: "Blockchain service not available. Contract not initialized.",
-      });
-    }
-
     const { type, id } = req.params;
     const recordId = parseInt(id);
 
+    let record = null;
     let hash, addedBy, timestamp, exists;
+
     switch (type) {
       case "medicine":
-        [hash, addedBy, timestamp, exists] = await contract.getMedicineHash(recordId);
+        record = await prisma.medicine_records.findUnique({
+          where: { medicine_id: recordId },
+          select: {
+            blockchain_hash: true,
+            blockchain_tx_hash: true,
+            created_at: true,
+            is_active: true,
+            created_by_user: {
+              select: {
+                wallet_address: true,
+                full_name: true
+              }
+            }
+          }
+        });
         break;
+      
       case "stock":
-        [hash, addedBy, timestamp, exists] = await contract.getStockHash(recordId);
+        record = await prisma.medicine_stocks.findUnique({
+          where: { stock_id: recordId },
+          select: {
+            blockchain_hash: true,
+            blockchain_tx_hash: true,
+            created_at: true,
+            is_active: true,
+            added_by_user: {
+              select: {
+                wallet_address: true,
+                full_name: true
+              }
+            }
+          }
+        });
         break;
+      
       case "receipt":
-        [hash, addedBy, timestamp, exists] = await contract.getReceiptHash(recordId);
+        record = await prisma.medicine_releases.findUnique({
+          where: { release_id: recordId },
+          select: {
+            blockchain_hash: true,
+            blockchain_tx_hash: true,
+            created_at: true,
+            released_by_user: {
+              select: {
+                wallet_address: true,
+                full_name: true
+              }
+            }
+          }
+        });
         break;
+      
       case "removal":
-        [hash, addedBy, timestamp, exists] = await contract.getRemovalHash(recordId);
+        record = await prisma.stock_removals.findUnique({
+          where: { removal_id: recordId },
+          select: {
+            blockchain_hash: true,
+            blockchain_tx_hash: true,
+            created_at: true,
+            removed_by_user: {
+              select: {
+                wallet_address: true,
+                full_name: true
+              }
+            }
+          }
+        });
         break;
-      case "staff":
-        [hash, addedBy, timestamp, exists] = await contract.getStaffHash(recordId);
-        break;
+      
       default:
         return res.status(400).json({ success: false, error: "Invalid type" });
     }
 
-    if (!exists) {
-      return res.status(404).json({ success: false, error: "Record not found on blockchain" });
+    if (!record) {
+      return res.status(404).json({ 
+        success: false, 
+        error: "Record not found in database" 
+      });
     }
+
+    hash = record.blockchain_hash;
+    addedBy = record.created_by_user?.wallet_address || 
+              record.added_by_user?.wallet_address || 
+              record.released_by_user?.wallet_address || 
+              record.removed_by_user?.wallet_address || 
+              "Unknown";
+    timestamp = Math.floor(new Date(record.created_at).getTime() / 1000);
+    exists = record.is_active !== undefined ? record.is_active : true;
 
     res.json({
       success: true,
-      data: { type, recordId, hash, addedBy, timestamp: Number(timestamp), exists },
+      data: { 
+        type, 
+        recordId, 
+        hash, 
+        addedBy, 
+        timestamp, 
+        exists,
+        txHash: record.blockchain_tx_hash || ""
+      },
     });
   } catch (error) {
     console.error("Error fetching record hash:", error);
@@ -355,38 +480,65 @@ router.get("/record/:type/:id", async (req, res, next) => {
 /**
  * ----------------------------------------------------------------
  * GET /blockchain/stats
- * Get blockchain statistics
+ * Get blockchain statistics from database
  * ----------------------------------------------------------------
  */
 router.get("/stats", async (req, res, next) => {
   try {
-    if (!contract) {
-      return res.status(503).json({
-        success: false,
-        error: "Blockchain service not available. Contract not initialized.",
-      });
-    }
+    const medicineCount = await prisma.medicine_records.count({
+      where: { blockchain_hash: { not: null } }
+    });
+    
+    const stockCount = await prisma.medicine_stocks.count({
+      where: { blockchain_hash: { not: null } }
+    });
+    
+    const receiptCount = await prisma.medicine_releases.count({
+      where: { blockchain_hash: { not: null } }
+    });
+    
+    const removalCount = await prisma.stock_removals.count({
+      where: { blockchain_hash: { not: null } }
+    });
 
-    const medicineCount = (typeof contract.getMedicineCount === "function") ? await contract.getMedicineCount() : 0;
-    const stockCount = (typeof contract.getStockCount === "function") ? await contract.getStockCount() : 0;
-    const receiptCount = (typeof contract.getReceiptCount === "function") ? await contract.getReceiptCount() : 0;
-    const removalCount = (typeof contract.getRemovalCount === "function") ? await contract.getRemovalCount() : 0;
-    const staffCount = (typeof contract.getStaffCount === "function") ? await contract.getStaffCount() : 0;
+    const totalRecords = medicineCount + stockCount + receiptCount + removalCount;
 
     res.json({
       success: true,
       stats: {
-        medicineCount: Number(medicineCount),
-        stockCount: Number(stockCount),
-        receiptCount: Number(receiptCount),
-        removalCount: Number(removalCount),
-        staffCount: Number(staffCount),
-        totalRecords: Number(medicineCount + stockCount + receiptCount + removalCount + staffCount),
+        medicineCount,
+        stockCount,
+        receiptCount,
+        removalCount,
+        totalRecords
       },
     });
   } catch (error) {
     console.error("Error fetching blockchain stats:", error);
     next(error);
+  }
+});
+
+/**
+ * ----------------------------------------------------------------
+ * POST /blockchain/invalidate-cache
+ * Manually invalidate the cache (useful after adding new records)
+ * ----------------------------------------------------------------
+ */
+router.post("/invalidate-cache", async (req, res) => {
+  try {
+    hashCache.del("blockchain_hashes");
+    console.log("✅ Cache invalidated");
+    res.json({
+      success: true,
+      message: "Cache invalidated successfully"
+    });
+  } catch (error) {
+    console.error("Error invalidating cache:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to invalidate cache"
+    });
   }
 });
 
