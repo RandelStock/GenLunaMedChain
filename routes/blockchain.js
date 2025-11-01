@@ -72,7 +72,7 @@ router.get("/hashes", async (req, res, next) => {
     const currentBlock = await provider.getBlockNumber();
     // Fetch last 50,000 blocks to balance between history and performance
     // This is approximately 1-2 weeks of history on Polygon
-    const fromBlock = Math.max(0, currentBlock - 50000);
+    const fromBlock = Math.max(0, currentBlock - 20000);
     
     console.log(`📊 Fetching events from block ${fromBlock} to ${currentBlock}`);
 
