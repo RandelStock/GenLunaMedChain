@@ -3,6 +3,7 @@ import { ethers } from "ethers";
 import crypto from "crypto";
 import { fileURLToPath } from "url";
 import path from "path";
+import { dirname } from "path";
 import fs from "fs";
 import prisma from "../config/prismaClient.js";
 import NodeCache from "node-cache";
@@ -12,7 +13,6 @@ const hashCache = new NodeCache({ stdTTL: 300 });
 
 const router = express.Router();
 
-// Get __dirname equivalent for ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
