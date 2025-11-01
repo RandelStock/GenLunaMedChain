@@ -84,115 +84,116 @@ router.get("/hashes", async (req, res, next) => {
     // Fetch medicine hashes from database
     const medicineHashes = await prisma.medicine_records.findMany({
       select: {
-        id: true,
-        hash: true,
-        added_by: true,
-        timestamp: true,
-        tx_hash: true
+        medicine_id: true,
+        blockchain_hash: true,
+        created_by: true,
+        created_at: true,
+        blockchain_tx_hash: true
       }
     });
     
     for (const record of medicineHashes) {
       allHashes.push({
         type: "medicine",
-        recordId: record.id,
-        hash: record.hash,
-        addedBy: record.added_by,
-        timestamp: new Date(record.timestamp).getTime(),
+        recordId: record.medicine_id,
+        hash: record.blockchain_hash,
+        addedBy: record.created_by,
+        timestamp: new Date(record.created_at).getTime(),
         exists: true,
-        txHash: record.tx_hash || ""
+        txHash: record.blockchain_tx_hash || ""
       });
     }
     
     // Fetch stock hashes from database
-    const stockHashes = await prisma.stock_records.findMany({
+    const stockHashes = await prisma.medicine_stocks.findMany({
       select: {
-        id: true,
-        hash: true,
-        added_by: true,
-        timestamp: true,
-        tx_hash: true
+        stock_id: true,
+        blockchain_hash: true,
+        created_by: true,
+        created_at: true,
+        blockchain_tx_hash: true
       }
     });
     
     for (const record of stockHashes) {
       allHashes.push({
         type: "stock",
-        recordId: record.id,
-        hash: record.hash,
-        addedBy: record.added_by,
-        timestamp: new Date(record.timestamp).getTime(),
+        recordId: record.stock_id,
+        hash: record.blockchain_hash,
+        addedBy: record.created_by,
+        timestamp: new Date(record.created_at).getTime(),
         exists: true,
-        txHash: record.tx_hash || ""
+        txHash: record.blockchain_tx_hash || ""
       });
     }
     
     // Fetch receipt hashes from database
-    const receiptHashes = await prisma.receipt_records.findMany({
+    const receiptHashes = await prisma.medicine_releases.findMany({
       select: {
-        id: true,
-        hash: true,
-        added_by: true,
-        timestamp: true,
-        tx_hash: true
+        release_id: true,
+        blockchain_hash: true,
+        created_by: true,
+        created_at: true,
+        blockchain_tx_hash: true
       }
     });
     
     for (const record of receiptHashes) {
       allHashes.push({
         type: "receipt",
-        recordId: record.id,
-        hash: record.hash,
-        addedBy: record.added_by,
-        timestamp: new Date(record.timestamp).getTime(),
+        recordId: record.release_id,
+        hash: record.blockchain_hash,
+        addedBy: record.created_by,
+        timestamp: new Date(record.created_at).getTime(),
         exists: true,
-        txHash: record.tx_hash || ""
+        txHash: record.blockchain_tx_hash || ""
       });
     }
     
     // Fetch removal hashes from database
-    const removalHashes = await prisma.removal_records.findMany({
+    const removalHashes = await prisma.stock_removals.findMany({
       select: {
-        id: true,
-        hash: true,
-        added_by: true,
-        timestamp: true,
-        tx_hash: true
+        removal_id: true,
+        blockchain_hash: true,
+        created_by: true,
+        created_at: true,
+        blockchain_tx_hash: true
       }
     });
     
     for (const record of removalHashes) {
       allHashes.push({
         type: "removal",
-        recordId: record.id,
-        hash: record.hash,
-        addedBy: record.added_by,
-        timestamp: new Date(record.timestamp).getTime(),
+        recordId: record.removal_id,
+        hash: record.blockchain_hash,
+        addedBy: record.created_by,
+        timestamp: new Date(record.created_at).getTime(),
         exists: true,
-        txHash: record.tx_hash || ""
+        txHash: record.blockchain_tx_hash || ""
       });
     }
     
     // Fetch staff hashes from database
-    const staffHashes = await prisma.staff_records.findMany({
+    // Note: staff_records model doesn't exist in the schema, using users model instead
+    const staffHashes = await prisma.users.findMany({
       select: {
-        id: true,
-        hash: true,
-        added_by: true,
-        timestamp: true,
-        tx_hash: true
+        user_id: true,
+        blockchain_hash: true,
+        created_by: true,
+        created_at: true,
+        blockchain_tx_hash: true
       }
     });
     
     for (const record of staffHashes) {
       allHashes.push({
         type: "staff",
-        recordId: record.id,
-        hash: record.hash,
-        addedBy: record.added_by,
-        timestamp: new Date(record.timestamp).getTime(),
+        recordId: record.user_id,
+        hash: record.blockchain_hash,
+        addedBy: record.created_by,
+        timestamp: new Date(record.created_at).getTime(),
         exists: true,
-        txHash: record.tx_hash || ""
+        txHash: record.blockchain_tx_hash || ""
       });
     }
     
