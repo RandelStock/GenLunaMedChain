@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import fs from "fs";
+import prisma from "../config/prismaClient.js";
 
 const router = express.Router();
 
@@ -53,181 +54,232 @@ function generateHash(data) {
 /**
  * ----------------------------------------------------------------
  * GET /blockchain/hashes
- * Fetches all hashes stored in the database instead of directly from blockchain
- * OPTIMIZED: Uses database records to avoid blockchain rate limits
+ * Fetches all hashes stored on the blockchain
+ * OPTIMIZED: Only fetch recent blocks to avoid timeout
  * ----------------------------------------------------------------
  */
 router.get("/hashes", async (req, res, next) => {
   try {
-    // Import prisma client
-    const { prisma } = await import("../prisma/client.js");
-    
-    console.log(`📊 Fetching blockchain transactions from database`);
-    
+    if (!contract) {
+      return res.status(503).json({
+        success: false,
+        error: "Blockchain service not available. Contract not initialized.",
+      });
+    }
+
     const allHashes = [];
+
+    // ✅ Get current block to calculate block range
+    const currentBlock = await provider.getBlockNumber();
+    // Fetch last 50,000 blocks to balance between history and performance
+    // This is approximately 1-2 weeks of history on Polygon
+    const fromBlock = Math.max(0, currentBlock - 20000);
     
-    // Fetch medicine transactions from database
-    const medicineRecords = await prisma.medicine_records.findMany({
-      where: {
-        blockchain_hash: { not: null },
-        blockchain_tx_hash: { not: null }
-      },
-      select: {
-        medicine_id: true,
-        blockchain_hash: true,
-        blockchain_tx_hash: true,
-        added_by_wallet: true,
-        created_at: true,
-        is_active: true
+    console.log(`📊 Fetching events from block ${fromBlock} to ${currentBlock}`);
+
+    // Helper: get unique ids from events for a given event set and map to latest tx
+    async function getIdsAndLatestTx(eventNames) {
+      const idsToLatestTx = new Map();
+      for (const { name, filterFactory } of eventNames) {
+        if (!contract.filters[name]) continue;
+        try {
+          const filter = filterFactory ? filterFactory() : contract.filters[name]();
+          const events = await contract.queryFilter(filter, fromBlock, "latest");
+          for (const ev of events) {
+            const id = Number(ev.args?.[0]);
+            if (!Number.isFinite(id)) continue;
+            idsToLatestTx.set(id, ev.transactionHash);
+          }
+        } catch (err) {
+          console.error(`Error fetching ${name}:`, err.message);
+        }
       }
-    });
-    
-    for (const record of medicineRecords) {
-      allHashes.push({
-        type: "medicine",
-        recordId: record.medicine_id,
-        hash: record.blockchain_hash,
-        addedBy: record.added_by_wallet,
-        timestamp: Math.floor(record.created_at.getTime() / 1000),
-        exists: record.is_active,
-        txHash: record.blockchain_tx_hash
-      });
+      return idsToLatestTx;
     }
-    
-    // Fetch stock transactions from database
-    const stockRecords = await prisma.medicine_stocks.findMany({
-      where: {
-        blockchain_hash: { not: null },
-        blockchain_tx_hash: { not: null }
-      },
-      select: {
-        stock_id: true,
-        blockchain_hash: true,
-        blockchain_tx_hash: true,
-        added_by_wallet: true,
-        created_at: true,
-        is_active: true
-      }
-    });
-    
-    for (const record of stockRecords) {
-      allHashes.push({
-        type: "stock",
-        recordId: record.stock_id,
-        hash: record.blockchain_hash,
-        addedBy: record.added_by_wallet,
-        timestamp: Math.floor(record.created_at.getTime() / 1000),
-        exists: record.is_active,
-        txHash: record.blockchain_tx_hash
-      });
-    }
-    
-    // Fetch receipt transactions from database (medicine_releases)
-    const receiptRecords = await prisma.medicine_releases.findMany({
-      where: {
-        blockchain_hash: { not: null },
-        blockchain_tx_hash: { not: null }
-      },
-      select: {
-        release_id: true,
-        blockchain_hash: true,
-        blockchain_tx_hash: true,
-        released_by_wallet: true,
-        created_at: true,
-        is_active: true
-      }
-    });
-    
-    for (const record of receiptRecords) {
-      allHashes.push({
-        type: "receipt",
-        recordId: record.release_id,
-        hash: record.blockchain_hash,
-        addedBy: record.released_by_wallet,
-        timestamp: Math.floor(record.created_at.getTime() / 1000),
-        exists: record.is_active,
-        txHash: record.blockchain_tx_hash
-      });
-    }
-    
-    // Fetch removal transactions from database
-    const removalRecords = await prisma.stock_removals.findMany({
-      where: {
-        blockchain_hash: { not: null },
-        blockchain_tx_hash: { not: null }
-      },
-      select: {
-        removal_id: true,
-        blockchain_hash: true,
-        blockchain_tx_hash: true,
-        removed_by_wallet: true,
-        created_at: true
-      }
-    });
-    
-    for (const record of removalRecords) {
-      allHashes.push({
-        type: "removal",
-        recordId: record.removal_id,
-        hash: record.blockchain_hash,
-        addedBy: record.removed_by_wallet,
-        timestamp: Math.floor(record.created_at.getTime() / 1000),
-        exists: true, // Removals don't have an is_active field
-        txHash: record.blockchain_tx_hash
-      });
-    }
-    
-    // Also fetch from blockchain_transactions table for comprehensive history
-    const blockchainTxs = await prisma.blockchain_transactions.findMany({
-      orderBy: {
-        created_at: 'desc'
-      },
-      take: 1000 // Limit to most recent 1000 transactions
-    });
-    
-    // Add any transactions from blockchain_transactions that aren't already included
-    for (const tx of blockchainTxs) {
-      // Skip if this transaction is already in allHashes
-      if (allHashes.some(h => h.txHash === tx.tx_hash)) {
-        continue;
-      }
-      
-      // Add transaction to allHashes
-      if (tx.entity_type && tx.entity_id) {
-        const type = tx.entity_type.toLowerCase();
+
+    // MEDICINE: derive ids from Stored/Updated/Deleted events
+    const medicineIds = await getIdsAndLatestTx([
+      { name: "MedicineHashStored", filterFactory: () => contract.filters.MedicineHashStored(null) },
+      { name: "MedicineHashUpdated", filterFactory: () => contract.filters.MedicineHashUpdated(null) },
+      { name: "MedicineHashDeleted", filterFactory: () => contract.filters.MedicineHashDeleted(null) },
+    ]);
+    for (const [id, latestTxHash] of medicineIds) {
+      try {
+        const [hash, addedBy, timestamp, exists] = await contract.getMedicineHash(id);
         allHashes.push({
-          type: type === 'medicine' ? 'medicine' : 
-                type === 'stock' ? 'stock' : 
-                type === 'receipt' ? 'receipt' : 
-                type === 'removal' ? 'removal' : type,
-          recordId: tx.entity_id,
-          hash: tx.event_data?.dataHash || tx.event_data?.hash || null,
-          addedBy: tx.from_address,
-          timestamp: Math.floor(tx.created_at.getTime() / 1000),
-          exists: tx.status !== 'DELETED',
-          txHash: tx.tx_hash
+          type: "medicine",
+          recordId: id,
+          hash,
+          addedBy,
+          timestamp: Number(timestamp),
+          exists,
+          txHash: latestTxHash,
+        });
+      } catch (err) {
+        console.error(`Error fetching medicine hash ${id}:`, err.message);
+      }
+    }
+
+    // STOCK
+    const stockIds = await getIdsAndLatestTx([
+      { name: "StockHashStored", filterFactory: () => contract.filters.StockHashStored(null) },
+      { name: "StockHashUpdated", filterFactory: () => contract.filters.StockHashUpdated(null) },
+      { name: "StockHashDeleted", filterFactory: () => contract.filters.StockHashDeleted(null) },
+    ]);
+    for (const [id, latestTxHash] of stockIds) {
+      try {
+        const [hash, addedBy, timestamp, exists] = await contract.getStockHash(id);
+        allHashes.push({
+          type: "stock",
+          recordId: id,
+          hash,
+          addedBy,
+          timestamp: Number(timestamp),
+          exists,
+          txHash: latestTxHash,
+        });
+      } catch (err) {
+        console.error(`Error fetching stock hash ${id}:`, err.message);
+      }
+    }
+
+    // RECEIPT - include each event (store/update/delete) as its own history row
+    try {
+      const storedEvents = await contract.queryFilter(
+        contract.filters.ReceiptHashStored(null), 
+        fromBlock, 
+        "latest"
+      );
+      for (const ev of storedEvents) {
+        const id = Number(ev.args?.[0]);
+        const dataHash = ev.args?.[1];
+        const addedBy = ev.args?.[2];
+        const ts = Number(ev.args?.[3]);
+        allHashes.push({
+          type: "receipt",
+          recordId: id,
+          hash: dataHash,
+          addedBy,
+          timestamp: ts,
+          exists: true,
+          txHash: ev.transactionHash,
         });
       }
+
+      const updatedEvents = await contract.queryFilter(
+        contract.filters.ReceiptHashUpdated(null), 
+        fromBlock, 
+        "latest"
+      );
+      for (const ev of updatedEvents) {
+        const id = Number(ev.args?.[0]);
+        const newHash = ev.args?.[2];
+        const updatedBy = ev.args?.[3];
+        const ts = Number(ev.args?.[4]);
+        allHashes.push({
+          type: "receipt",
+          recordId: id,
+          hash: newHash,
+          addedBy: updatedBy,
+          timestamp: ts,
+          exists: true,
+          txHash: ev.transactionHash,
+        });
+      }
+
+      const deletedEvents = await contract.queryFilter(
+        contract.filters.ReceiptHashDeleted(null), 
+        fromBlock, 
+        "latest"
+      );
+      
+      for (const ev of deletedEvents) {
+        const id = Number(ev.args?.[0]);
+        const removedBy = ev.args?.[1];
+        const ts = Number(ev.args?.[2]);
+        
+        // Try to get the last known hash before deletion
+        let priorHash = null;
+        try {
+          const updates = await contract.queryFilter(
+            contract.filters.ReceiptHashUpdated(id), 
+            fromBlock, 
+            ev.blockNumber
+          );
+          const stores = await contract.queryFilter(
+            contract.filters.ReceiptHashStored(id), 
+            fromBlock, 
+            ev.blockNumber
+          );
+          const candidates = [];
+          for (const e of updates) {
+            candidates.push({ 
+              blockNumber: e.blockNumber, 
+              logIndex: e.index, 
+              hash: e.args?.[2] 
+            });
+          }
+          for (const e of stores) {
+            candidates.push({ 
+              blockNumber: e.blockNumber, 
+              logIndex: e.index, 
+              hash: e.args?.[1] 
+            });
+          }
+          if (candidates.length > 0) {
+            candidates.sort((a, b) => 
+              a.blockNumber !== b.blockNumber 
+                ? a.blockNumber - b.blockNumber 
+                : a.logIndex - b.logIndex
+            );
+            priorHash = candidates[candidates.length - 1].hash || null;
+          }
+        } catch (e) {
+          // If we can't find it, that's ok
+        }
+        
+        allHashes.push({
+          type: "receipt",
+          recordId: id,
+          hash: priorHash,
+          addedBy: removedBy,
+          timestamp: ts,
+          exists: false,
+          txHash: ev.transactionHash,
+        });
+      }
+    } catch (err) {
+      console.error("Error fetching receipt events:", err.message);
     }
-    
-    // ✅ Sort newest first
-    allHashes.sort((a, b) => b.timestamp - a.timestamp);
-    
-    console.log(`✅ Fetched ${allHashes.length} blockchain hashes from database successfully`);
-    
-    // Get current block if contract is available (for informational purposes only)
-    let currentBlock = 0;
-    let fromBlock = 0;
-    
-    if (contract && provider) {
+
+    // REMOVAL
+    const removalIds = await getIdsAndLatestTx([
+      { name: "RemovalHashStored", filterFactory: () => contract.filters.RemovalHashStored(null) },
+      { name: "RemovalHashUpdated", filterFactory: () => contract.filters.RemovalHashUpdated(null) },
+      { name: "RemovalHashDeleted", filterFactory: () => contract.filters.RemovalHashDeleted(null) },
+    ]);
+    for (const [id, latestTxHash] of removalIds) {
       try {
-        currentBlock = await provider.getBlockNumber();
-        fromBlock = Math.max(0, currentBlock - 20000); // Just for reference
+        const [hash, removedBy, timestamp, exists] = await contract.getRemovalHash(id);
+        allHashes.push({
+          type: "removal",
+          recordId: id,
+          hash,
+          addedBy: removedBy,
+          timestamp: Number(timestamp),
+          exists,
+          txHash: latestTxHash,
+        });
       } catch (err) {
-        console.warn("Could not fetch current block number:", err.message);
+        console.error(`Error fetching removal hash ${id}:`, err.message);
       }
     }
-    
+
+    // ✅ Sort newest first
+    allHashes.sort((a, b) => b.timestamp - a.timestamp);
+
+    console.log(`✅ Fetched ${allHashes.length} blockchain hashes successfully`);
+
     res.json({
       success: true,
       hashes: allHashes,
