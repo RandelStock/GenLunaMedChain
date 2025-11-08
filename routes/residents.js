@@ -3,58 +3,108 @@ import express from "express";
 import { PrismaClient } from "@prisma/client";
 import { logAudit, getIpAddress, getUserAgent } from "../utils/auditLogger.js";
 import { getBarangayFilter, canModifyRecord } from '../middleware/baranggayAccess.js';
-// import { authenticateUser } from '../middleware/auth.js';
-
-// // Uncomment these:
-// router.use(authenticateUser);
-// router.use(checkBarangayAccess);
 
 const router = express.Router();
 const prisma = new PrismaClient();
 
 // ============================================
-// BARANGAY HELPER FUNCTIONS
-// ============================================
-
-// const getBarangayFilter = (user) => {
-//   if (!user) return {}; // No user auth yet
-//   if (user.role === 'ADMIN' || user.role === 'MUNICIPAL_STAFF') {
-//     return {}; // See all barangays
-//   }
-//   if (user.assigned_barangay) {
-//     return { barangay: user.assigned_barangay };
-//   }
-//   return {};
-// };
-
-// const canModifyRecord = (user, recordBarangay) => {
-//   if (!user) return true; // No auth yet
-//   if (user.role === 'ADMIN' || user.role === 'MUNICIPAL_STAFF') {
-//     return true;
-//   }
-//   return user.assigned_barangay === recordBarangay;
-// };
-
-// ============================================
 // HELPER FUNCTIONS
 // ============================================
 
-// Helper function to calculate age category
 function calculateAgeCategory(age) {
   if (age === null || age === undefined) return null;
-  if (age <= 1.99) return 'ZERO_TO_23_MONTHS'; // 0-23 months
-  if (age <= 4.99) return 'TWENTY_FOUR_TO_59_MONTHS'; // 24-59 months
-  if (age <= 5.99) return 'SIXTY_TO_71_MONTHS'; // 60-71 months
+  if (age <= 1.99) return 'ZERO_TO_23_MONTHS';
+  if (age <= 4.99) return 'TWENTY_FOUR_TO_59_MONTHS';
+  if (age <= 5.99) return 'SIXTY_TO_71_MONTHS';
   return 'ABOVE_71_MONTHS';
 }
 
-// Helper function to check if senior citizen (60+ years)
 function isSeniorCitizen(age) {
   return age !== null && age >= 60;
 }
 
 // ============================================
-// ROUTES
+// NEW: CHECK FOR DUPLICATE RESIDENTS
+// ============================================
+
+/**
+ * POST /api/residents/check-duplicate
+ * Check if a resident with similar details already exists
+ */
+router.post("/check-duplicate", async (req, res, next) => {
+  try {
+    const { first_name, last_name, date_of_birth, middle_name } = req.body;
+
+    if (!first_name || !last_name) {
+      return res.status(400).json({ 
+        error: 'First name and last name are required' 
+      });
+    }
+
+    // Build search conditions
+    const searchConditions = {
+      first_name: { equals: first_name.trim(), mode: 'insensitive' },
+      last_name: { equals: last_name.trim(), mode: 'insensitive' },
+      is_active: true
+    };
+
+    // Add middle name if provided
+    if (middle_name && middle_name.trim()) {
+      searchConditions.middle_name = { 
+        equals: middle_name.trim(), 
+        mode: 'insensitive' 
+      };
+    }
+
+    // Add date of birth if provided
+    if (date_of_birth) {
+      searchConditions.date_of_birth = new Date(date_of_birth).toISOString();
+    }
+
+    // Search for potential duplicates
+    const potentialDuplicates = await prisma.residents.findMany({
+      where: searchConditions,
+      select: {
+        resident_id: true,
+        first_name: true,
+        middle_name: true,
+        last_name: true,
+        full_name: true,
+        date_of_birth: true,
+        age: true,
+        gender: true,
+        barangay: true,
+        address: true,
+        phone: true,
+        is_4ps_member: true,
+        is_pregnant: true,
+        is_senior_citizen: true
+      }
+    });
+
+    if (potentialDuplicates.length > 0) {
+      return res.json({
+        success: true,
+        duplicateFound: true,
+        count: potentialDuplicates.length,
+        duplicates: potentialDuplicates,
+        message: `Found ${potentialDuplicates.length} potential duplicate(s)`
+      });
+    }
+
+    res.json({
+      success: true,
+      duplicateFound: false,
+      message: 'No duplicates found'
+    });
+  } catch (error) {
+    console.error('Error checking for duplicates:', error);
+    next(error);
+  }
+});
+
+// ============================================
+// EXISTING ROUTES
 // ============================================
 
 /**
@@ -67,7 +117,6 @@ router.get("/statistics", async (req, res, next) => {
     
     const { barangay } = req.query;
     
-    // If admin queries specific barangay
     let where = { ...barangayFilter, is_active: true };
     if (barangay && user && (user.role === 'ADMIN' || user.role === 'MUNICIPAL_STAFF')) {
       where = { barangay, is_active: true };
@@ -82,29 +131,16 @@ router.get("/statistics", async (req, res, next) => {
       ageCategories,
       barangayStats
     ] = await Promise.all([
-      // Total residents
       prisma.residents.count({ where }),
-      
-      // 4Ps members
       prisma.residents.count({ where: { ...where, is_4ps_member: true } }),
-      
-      // Pregnant residents
       prisma.residents.count({ where: { ...where, is_pregnant: true } }),
-      
-      // Senior citizens
       prisma.residents.count({ where: { ...where, is_senior_citizen: true } }),
-      
-      // Birth registered
       prisma.residents.count({ where: { ...where, is_birth_registered: true } }),
-      
-      // Age category breakdown
       prisma.residents.groupBy({
         by: ['age_category'],
         where,
         _count: true
       }),
-      
-      // Barangay breakdown (only if admin and no specific barangay filter)
       (!barangay && user && (user.role === 'ADMIN' || user.role === 'MUNICIPAL_STAFF')) 
         ? prisma.residents.groupBy({
             by: ['barangay'],
@@ -147,7 +183,6 @@ router.get("/statistics/barangay/:barangay", async (req, res, next) => {
     const user = req.user || null;
     const { barangay } = req.params;
 
-    // Check if user has access to this barangay
     if (user && !canModifyRecord(user, barangay)) {
       return res.status(403).json({ 
         error: 'Access denied to this barangay',
@@ -231,7 +266,6 @@ router.get("/", async (req, res, next) => {
     
     let where = { ...barangayFilter, is_active: true };
     
-    // Admin can filter by specific barangay
     if (barangay && user && (user.role === 'ADMIN' || user.role === 'MUNICIPAL_STAFF')) {
       where.barangay = barangay;
     }
@@ -278,7 +312,7 @@ router.get("/", async (req, res, next) => {
 });
 
 /**
- * GET resident by ID with barangay access check
+ * GET resident by ID with medical records and medicine releases
  */
 router.get("/:id", async (req, res, next) => {
   try {
@@ -286,13 +320,28 @@ router.get("/:id", async (req, res, next) => {
 
     const resident = await prisma.residents.findUnique({
       where: { resident_id: Number(req.params.id) },
+      include: {
+        // Include medicine releases if the table exists
+        medicine_releases: {
+          orderBy: { date_released: 'desc' },
+          take: 10,
+          include: {
+            medicine: {
+              select: {
+                medicine_name: true,
+                dosage_form: true,
+                strength: true
+              }
+            }
+          }
+        }
+      }
     });
 
     if (!resident) {
       return res.status(404).json({ error: "Resident not found" });
     }
 
-    // Check barangay access
     if (user && !canModifyRecord(user, resident.barangay)) {
       return res.status(403).json({ 
         error: 'Access denied to this barangay',
@@ -309,26 +358,57 @@ router.get("/:id", async (req, res, next) => {
 });
 
 /**
- * POST new resident with barangay assignment
+ * POST new resident with duplicate check
  */
 router.post("/", async (req, res, next) => {
   try {
     const user = req.user || null;
-    const { resident_id, barangay, ...data } = req.body;
+    const { resident_id, barangay, skip_duplicate_check, ...data } = req.body;
 
     // Determine barangay assignment
     let assignedBarangay = barangay;
 
-    // If user is not admin, force their assigned barangay
     if (user && user.role !== 'ADMIN' && user.role !== 'MUNICIPAL_STAFF') {
       assignedBarangay = user.assigned_barangay;
     }
 
-    // Barangay is required
     if (!assignedBarangay) {
       return res.status(400).json({ 
         error: 'Barangay is required for resident registration' 
       });
+    }
+
+    // Check for duplicates unless explicitly skipped
+    if (!skip_duplicate_check) {
+      const searchConditions = {
+        first_name: { equals: data.first_name.trim(), mode: 'insensitive' },
+        last_name: { equals: data.last_name.trim(), mode: 'insensitive' },
+        is_active: true
+      };
+
+      if (data.date_of_birth) {
+        searchConditions.date_of_birth = new Date(data.date_of_birth).toISOString();
+      }
+
+      const existingResident = await prisma.residents.findFirst({
+        where: searchConditions
+      });
+
+      if (existingResident) {
+        return res.status(409).json({
+          error: 'Potential duplicate resident found',
+          duplicateFound: true,
+          duplicate: {
+            resident_id: existingResident.resident_id,
+            full_name: existingResident.full_name,
+            date_of_birth: existingResident.date_of_birth,
+            age: existingResident.age,
+            barangay: existingResident.barangay,
+            address: existingResident.address
+          },
+          message: 'A resident with similar details already exists. Please review or add skip_duplicate_check=true to proceed anyway.'
+        });
+      }
     }
 
     // Process dates
@@ -350,7 +430,6 @@ router.post("/", async (req, res, next) => {
       data.is_senior_citizen = isSeniorCitizen(data.age);
     }
 
-    // Add barangay to data
     data.barangay = assignedBarangay;
     
     const resident = await prisma.residents.create({ 
@@ -395,7 +474,6 @@ router.put("/:id", async (req, res, next) => {
       return res.status(404).json({ error: "Resident not found" });
     }
 
-    // Check barangay access
     if (user && !canModifyRecord(user, oldResident.barangay)) {
       return res.status(403).json({ 
         error: 'You do not have permission to modify this resident',
@@ -471,12 +549,10 @@ router.delete("/:id", async (req, res, next) => {
       return res.status(404).json({ error: "Resident not found" });
     }
 
-    // Check barangay access
     if (user && !canModifyRecord(user, oldResident.barangay)) {
       return res.status(403).json({ error: 'Access denied' });
     }
     
-    // Soft delete instead of hard delete
     await prisma.residents.update({
       where: { resident_id: residentId },
       data: { is_active: false }
@@ -506,14 +582,13 @@ router.delete("/:id", async (req, res, next) => {
 });
 
 /**
- * GET /api/residents/barangay/:barangay/compare
+ * GET /api/residents/compare/barangays
  * Compare resident demographics across barangays (admin only)
  */
 router.get("/compare/barangays", async (req, res, next) => {
   try {
     const user = req.user || null;
 
-    // Only admin/municipal staff can compare barangays
     if (user && user.role !== 'ADMIN' && user.role !== 'MUNICIPAL_STAFF') {
       return res.status(403).json({ error: 'Access denied' });
     }
@@ -526,7 +601,6 @@ router.get("/compare/barangays", async (req, res, next) => {
       }
     });
 
-    // Get detailed stats per barangay
     const detailedStats = await Promise.all(
       comparison.map(async (item) => {
         const [fourPs, pregnant, senior, birthReg] = await Promise.all([
