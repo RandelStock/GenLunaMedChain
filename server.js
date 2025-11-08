@@ -31,7 +31,7 @@ const app = express();
 const prisma = new PrismaClient();
 
 app.use(cors({
-  origin: ["https://genluna-medchain.netlify.app"], 
+  origin: ["https://gen-luna-medchain-frontend.vercel.app"], 
   methods: ["GET", "POST", "PATCH","PUT", "DELETE"],
   credentials: true,
   allowedHeaders: [
