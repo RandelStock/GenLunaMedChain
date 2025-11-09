@@ -1,4 +1,5 @@
 // Enhanced Prisma schema with Barangay-specific medicine management
+// Added: is_profile_complete, is_philhealth_member, philhealth_number, other_program, resident_id in consultations
 
 generator client {
   provider = "prisma-client-js"
@@ -13,10 +14,10 @@ datasource db {
 // Enums
 // ---------------------------
 enum Role {
-  ADMIN // Municipal admin - sees all barangays
-  PHARMACIST // Barangay pharmacist - sees only their barangay
-  STAFF // Barangay staff - sees only their barangay
-  MUNICIPAL_STAFF // Municipal staff - sees all barangays (read-only)
+  ADMIN
+  PHARMACIST
+  STAFF
+  MUNICIPAL_STAFF
 }
 
 enum Gender {
@@ -72,7 +73,7 @@ enum Barangay {
   SANTA_MARIA_ILAYA
   SUMILANG
   VILLARICA
-  MUNICIPAL // For municipal health center
+  MUNICIPAL
 }
 
 enum AgeCategory {
@@ -82,8 +83,32 @@ enum AgeCategory {
   ABOVE_71_MONTHS
 }
 
+enum ConsultationType {
+  GENERAL
+  FOLLOW_UP
+  EMERGENCY
+  PREVENTIVE
+  SPECIALIST
+}
+
+enum ConsultationStatus {
+  SCHEDULED
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum ProviderType {
+  DOCTOR
+  NURSE
+  SPECIALIST
+  EMERGENCY
+}
+
 // ---------------------------
-// Users - NOW WITH BARANGAY ASSIGNMENT
+// Users
 // ---------------------------
 model users {
   user_id        Int     @id @default(autoincrement())
@@ -93,8 +118,7 @@ model users {
   phone          String? @db.VarChar(50)
   role           Role
 
-  // NEW: Barangay assignment for staff/pharmacists
-  assigned_barangay Barangay? // NULL for ADMIN/MUNICIPAL_STAFF, specific barangay for others
+  assigned_barangay Barangay?
 
   is_active  Boolean  @default(true)
   created_at DateTime @default(now())
@@ -116,7 +140,7 @@ model users {
 }
 
 // ---------------------------
-// Medicines - NOW BARANGAY-SPECIFIC
+// Medicines
 // ---------------------------
 model medicine_records {
   medicine_id          Int     @id @default(autoincrement())
@@ -131,8 +155,7 @@ model medicine_records {
   storage_requirements String?
   total_quantity       Int     @default(0)
 
-  // NEW: Barangay ownership
-  barangay Barangay // Which barangay health center owns this medicine
+  barangay Barangay
 
   is_active Boolean @default(true)
 
@@ -157,7 +180,7 @@ model medicine_records {
 }
 
 // ---------------------------
-// Suppliers - SHARED ACROSS ALL BARANGAYS
+// Suppliers
 // ---------------------------
 model suppliers {
   supplier_id    Int      @id @default(autoincrement())
@@ -175,14 +198,12 @@ model suppliers {
 }
 
 // ---------------------------
-// Stocks - INHERITS BARANGAY FROM MEDICINE
+// Stocks
 // ---------------------------
 model medicine_stocks {
   stock_id    Int              @id @default(autoincrement())
   medicine_id Int
   medicine    medicine_records @relation(fields: [medicine_id], references: [medicine_id])
-
-  // Barangay is implicitly determined by the medicine's barangay
 
   batch_number       String     @db.VarChar(100)
   quantity           Int
@@ -216,7 +237,7 @@ model medicine_stocks {
 model stock_transactions {
   transaction_id      Int      @id @default(autoincrement())
   stock_id            Int
-  transaction_type    String // 'ADDITION' or 'REMOVAL'
+  transaction_type    String
   quantity_changed    Int
   quantity_before     Int
   quantity_after      Int
@@ -233,7 +254,7 @@ model stock_transactions {
 }
 
 // ---------------------------
-// Residents - WITH BARANGAY TRACKING
+// Residents - WITH NEW FIELDS
 // ---------------------------
 model residents {
   resident_id   Int          @id @default(autoincrement())
@@ -246,23 +267,31 @@ model residents {
   age_category  AgeCategory?
   gender        Gender?
 
-  // Barangay tracking
-  barangay     Barangay // Which barangay the resident belongs to
+  barangay     Barangay
   zone         String?  @db.VarChar(50)
   household_no String?  @db.VarChar(50)
   family_no    String?  @db.VarChar(50)
 
-  // Tracking fields
+  // NEW: Profile completion tracking
+  is_profile_complete Boolean @default(false)
+
+  // Program memberships
   is_4ps_member       Boolean @default(false)
+  
+  // NEW: PhilHealth tracking
+  is_philhealth_member Boolean @default(false)
+  philhealth_number    String? @db.VarChar(50)
+  
   is_pregnant         Boolean @default(false)
   is_senior_citizen   Boolean @default(false)
   is_birth_registered Boolean @default(false)
 
-  // Pregnancy specific fields
+  // NEW: Other programs/memberships
+  other_program String? @db.VarChar(255)
+
   pregnancy_due_date DateTime?
   pregnancy_notes    String?
 
-  // Birth registry fields
   birth_registry_date  DateTime?
   birth_certificate_no String?   @db.VarChar(100)
 
@@ -277,18 +306,21 @@ model residents {
   updated_at         DateTime @default(now())
 
   medicine_releases medicine_releases[]
+  consultations     consultations[]
 
   @@index([barangay])
   @@index([barangay, is_active])
   @@index([age_category])
   @@index([is_4ps_member])
+  @@index([is_philhealth_member])
   @@index([is_pregnant])
   @@index([is_senior_citizen])
+  @@index([is_profile_complete])
   @@map("residents")
 }
 
 // ---------------------------
-// Medicine Releases - BARANGAY-SPECIFIC
+// Medicine Releases
 // ---------------------------
 model medicine_releases {
   release_id  Int              @id @default(autoincrement())
@@ -323,7 +355,7 @@ model medicine_releases {
 }
 
 // ---------------------------
-// Stock Removals - BARANGAY-SPECIFIC
+// Stock Removals
 // ---------------------------
 model stock_removals {
   removal_id       Int              @id @default(autoincrement())
@@ -360,7 +392,6 @@ model blockchain_transactions {
   entity_id        Int?
   from_address     String? @db.VarChar(42)
 
-  // NEW: Track which barangay the transaction is for
   barangay Barangay?
 
   gas_used     BigInt?
@@ -417,7 +448,7 @@ model audit_log {
 }
 
 // ---------------------------
-// NEW: Barangay Health Centers Table (Optional but Recommended)
+// Barangay Health Centers
 // ---------------------------
 model barangay_health_centers {
   id             Int      @id @default(autoincrement())
@@ -428,7 +459,6 @@ model barangay_health_centers {
   phone          String?  @db.VarChar(50)
   email          String?  @db.VarChar(255)
 
-  // Operational info
   operating_hours String?
   bed_capacity    Int?
   staff_count     Int?
@@ -441,7 +471,7 @@ model barangay_health_centers {
 }
 
 // ---------------------------
-// Calendar Events (Unified Scheduling)
+// Calendar Events
 // ---------------------------
 model calendar_events {
   event_id      Int        @id @default(autoincrement())
@@ -467,10 +497,15 @@ model calendar_events {
 }
 
 // ---------------------------
-// Telemedicine Consultations
+// Telemedicine Consultations - WITH NEW FIELD
 // ---------------------------
 model consultations {
   consultation_id    Int            @id @default(autoincrement())
+  
+  // NEW: Link to resident
+  resident_id        Int?
+  resident           residents?     @relation(fields: [resident_id], references: [resident_id])
+  
   patient_name       String         @db.VarChar(255)
   patient_email      String?        @db.VarChar(255)
   patient_phone      String         @db.VarChar(50)
@@ -479,47 +514,41 @@ model consultations {
   patient_barangay   Barangay
   patient_address    String?
   
-  // Medical information
   chief_complaint    String         @db.Text
   symptoms           String?        @db.Text
   medical_history    String?        @db.Text
   current_medications String?       @db.Text
   allergies          String?        @db.Text
   
-  // Consultation details
   consultation_type  ConsultationType
   scheduled_date     DateTime
-  scheduled_time     String         @db.VarChar(10) // e.g., "09:00", "14:30"
+  scheduled_time     String         @db.VarChar(10)
   duration_minutes   Int            @default(30)
   status             ConsultationStatus @default(SCHEDULED)
   
-  // Healthcare provider assignment
   assigned_doctor_id Int?
   assigned_doctor    users?         @relation("consultations_assigned_doctor", fields: [assigned_doctor_id], references: [user_id])
   assigned_nurse_id  Int?
   assigned_nurse     users?         @relation("consultations_assigned_nurse", fields: [assigned_nurse_id], references: [user_id])
   
-  // Consultation notes and outcomes
   consultation_notes String?        @db.Text
   diagnosis          String?        @db.Text
   prescription       String?        @db.Text
   follow_up_required Boolean        @default(false)
   follow_up_date     DateTime?
   
-  // Video call details
   meeting_link       String?        @db.VarChar(500)
   meeting_id         String?        @db.VarChar(100)
   meeting_password   String?        @db.VarChar(50)
   
-  // Audit fields
   created_at         DateTime       @default(now())
   updated_at         DateTime       @default(now())
   completed_at       DateTime?
   
-  // Blockchain integration
   blockchain_hash    String?        @unique @db.VarChar(66)
   blockchain_tx_hash String?        @db.VarChar(66)
   
+  @@index([resident_id])
   @@index([patient_barangay])
   @@index([scheduled_date])
   @@index([status])
@@ -528,44 +557,22 @@ model consultations {
   @@map("consultations")
 }
 
-enum ConsultationType {
-  GENERAL
-  FOLLOW_UP
-  EMERGENCY
-  PREVENTIVE
-  SPECIALIST
-}
-
-enum ConsultationStatus {
-  SCHEDULED
-  CONFIRMED
-  IN_PROGRESS
-  COMPLETED
-  CANCELLED
-  NO_SHOW
-}
-
 // ---------------------------
-// Provider Availability Management
+// Provider Availability
 // ---------------------------
 model provider_availability {
   availability_id    Int      @id @default(autoincrement())
   provider_id        Int
   provider           users    @relation(fields: [provider_id], references: [user_id], onDelete: Cascade)
   
-  // Day of week (0 = Sunday, 1 = Monday, ..., 6 = Saturday)
-  day_of_week        Int      // 0-6
-  start_time         String   @db.VarChar(5) // Format: "08:00"
-  end_time           String   @db.VarChar(5) // Format: "17:00"
+  day_of_week        Int
+  start_time         String   @db.VarChar(5)
+  end_time           String   @db.VarChar(5)
   
-  // Break times (optional)
   break_start_time   String?  @db.VarChar(5)
   break_end_time     String?  @db.VarChar(5)
   
-  // Slot duration in minutes (default 30)
   slot_duration      Int      @default(30)
-  
-  // Maximum consultations per day
   max_consultations  Int      @default(10)
   
   is_active          Boolean  @default(true)
@@ -585,21 +592,14 @@ model provider_specializations {
   provider_id        Int
   provider           users    @relation(fields: [provider_id], references: [user_id], onDelete: Cascade)
   
-  specialization     String   @db.VarChar(100) // e.g., "General Medicine", "Pediatrics", "Emergency Care"
+  specialization     String   @db.VarChar(100)
   description        String?  @db.Text
   years_experience   Int?
   
-  is_primary         Boolean  @default(false) // Primary specialization
+  is_primary         Boolean  @default(false)
   created_at         DateTime @default(now())
   updated_at         DateTime @default(now())
   
   @@index([provider_id])
   @@map("provider_specializations")
-}
-
-enum ProviderType {
-  DOCTOR
-  NURSE
-  SPECIALIST
-  EMERGENCY
 }

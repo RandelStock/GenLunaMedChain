@@ -313,6 +313,49 @@ router.post('/', async (req, res, next) => {
     // Generate meeting details
     const meetingDetails = generateMeetingDetails();
     
+    // Auto-create or find resident based on consultation data
+    let residentId = null;
+    
+    try {
+      // First, try to find existing resident with matching phone number
+      const existingResident = await prisma.residents.findFirst({
+        where: {
+          phone: patient_phone,
+          is_active: true
+        }
+      });
+      
+      if (existingResident) {
+        // Link to existing resident
+        residentId = existingResident.resident_id;
+        console.log(`Found existing resident ${residentId} with phone ${patient_phone}`);
+      } else {
+        // Create new resident with basic info from consultation
+        const newResident = await prisma.residents.create({
+          data: {
+            first_name: patient_name.split(' ')[0] || '',
+            last_name: patient_name.split(' ').slice(1).join(' ') || patient_name,
+            full_name: patient_name,
+            phone: patient_phone,
+            barangay: patient_barangay,
+            address: patient_address || '',
+            gender: patient_gender || null,
+            age: patient_age ? parseInt(patient_age) : null,
+            is_profile_complete: false, // Mark as incomplete profile
+            created_at: new Date(),
+            updated_at: new Date()
+          }
+        });
+        
+        residentId = newResident.resident_id;
+        console.log(`Created new resident ${residentId} from consultation`);
+      }
+    } catch (residentError) {
+      console.error('Error creating/finding resident:', residentError);
+      // Continue with consultation creation even if resident creation fails
+      // This ensures the consultation still gets created
+    }
+    
     // Create consultation
     const consultation = await prisma.consultations.create({
       data: {
@@ -333,6 +376,7 @@ router.post('/', async (req, res, next) => {
         scheduled_time: scheduledTime24,
         assigned_doctor_id: assigned_doctor_id ? parseInt(assigned_doctor_id) : null,
         assigned_nurse_id: assigned_nurse_id ? parseInt(assigned_nurse_id) : null,
+        resident_id: residentId, // Link to resident (if created/found)
         ...meetingDetails
       }
     });
@@ -436,6 +480,9 @@ router.get('/', async (req, res, next) => {
           },
           assigned_nurse: {
             select: { full_name: true, email: true }
+          },
+          resident: {
+            select: { resident_id: true, full_name: true, is_profile_complete: true }
           }
         },
         orderBy: { scheduled_date: 'asc' },
@@ -481,6 +528,9 @@ router.get('/:id', async (req, res, next) => {
         },
         assigned_nurse: {
           select: { full_name: true, email: true, phone: true }
+        },
+        resident: {
+          select: { resident_id: true, full_name: true, is_profile_complete: true }
         }
       }
     });
