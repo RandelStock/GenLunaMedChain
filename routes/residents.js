@@ -104,6 +104,76 @@ router.post("/check-duplicate", async (req, res, next) => {
 });
 
 // ============================================
+// NEW: OPTIMIZED EXPORT ENDPOINT
+// ============================================
+
+/**
+ * GET /api/residents/export/all
+ * Optimized endpoint for exporting all residents without heavy relations
+ * This endpoint is specifically designed to handle large datasets for PDF/CSV exports
+ */
+router.get("/export/all", async (req, res, next) => {
+  try {
+    const user = req.user || null;
+    const barangayFilter = getBarangayFilter(user);
+    
+    const { barangay } = req.query;
+    
+    let where = { ...barangayFilter, is_active: true };
+    if (barangay && user && (user.role === 'ADMIN' || user.role === 'MUNICIPAL_STAFF')) {
+      where = { barangay, is_active: true };
+    }
+    
+    console.log('Fetching residents for export with filter:', where);
+    
+    // Fetch only essential fields, no relations to avoid timeout
+    const residents = await prisma.residents.findMany({
+      where,
+      select: {
+        resident_id: true,
+        first_name: true,
+        middle_name: true,
+        last_name: true,
+        full_name: true,
+        date_of_birth: true,
+        age: true,
+        gender: true,
+        phone: true,
+        barangay: true,
+        address: true,
+        is_4ps_member: true,
+        is_philhealth_member: true,
+        philhealth_number: true,
+        is_pregnant: true,
+        is_senior_citizen: true,
+        is_birth_registered: true,
+        is_profile_complete: true,
+        age_category: true
+      },
+      orderBy: { resident_id: 'asc' }
+    });
+    
+    console.log(`Successfully fetched ${residents.length} residents for export`);
+    
+    res.json({
+      success: true,
+      data: residents,
+      count: residents.length,
+      barangay: user?.assigned_barangay || barangay || 'ALL'
+    });
+  } catch (error) {
+    console.error('Error exporting residents:', error);
+    
+    // Return a more specific error
+    res.status(500).json({ 
+      error: 'Failed to export residents',
+      message: error.message,
+      details: 'This may be due to database timeout or memory limitations. Try filtering by barangay.'
+    });
+  }
+});
+
+// ============================================
 // EXISTING ROUTES
 // ============================================
 
@@ -245,7 +315,67 @@ router.get("/statistics/barangay/:barangay", async (req, res, next) => {
 });
 
 /**
+ * GET /api/residents/compare/barangays
+ * Compare resident demographics across barangays (admin only)
+ * NOTE: Moved before the generic GET "/" route to prevent route conflicts
+ */
+router.get("/compare/barangays", async (req, res, next) => {
+  try {
+    const user = req.user || null;
+
+    if (user && user.role !== 'ADMIN' && user.role !== 'MUNICIPAL_STAFF') {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const comparison = await prisma.residents.groupBy({
+      by: ['barangay'],
+      where: { is_active: true },
+      _count: {
+        resident_id: true
+      }
+    });
+
+    const detailedStats = await Promise.all(
+      comparison.map(async (item) => {
+        const [fourPs, pregnant, senior, birthReg] = await Promise.all([
+          prisma.residents.count({ 
+            where: { barangay: item.barangay, is_4ps_member: true, is_active: true } 
+          }),
+          prisma.residents.count({ 
+            where: { barangay: item.barangay, is_pregnant: true, is_active: true } 
+          }),
+          prisma.residents.count({ 
+            where: { barangay: item.barangay, is_senior_citizen: true, is_active: true } 
+          }),
+          prisma.residents.count({ 
+            where: { barangay: item.barangay, is_birth_registered: true, is_active: true } 
+          })
+        ]);
+
+        return {
+          barangay: item.barangay,
+          total: item._count.resident_id,
+          fourPsMembers: fourPs,
+          pregnant: pregnant,
+          seniorCitizens: senior,
+          birthRegistered: birthReg
+        };
+      })
+    );
+
+    res.json({ 
+      success: true, 
+      data: detailedStats 
+    });
+  } catch (err) {
+    console.error('Compare barangays error:', err);
+    next(err);
+  }
+});
+
+/**
  * GET all residents with filters and barangay access control
+ * UPDATED: Optimized for large datasets
  */
 router.get("/", async (req, res, next) => {
   try {
@@ -255,10 +385,12 @@ router.get("/", async (req, res, next) => {
     const { 
       barangay, 
       age_category, 
-      is_4ps_member, 
+      is_4ps_member,
+      is_philhealth_member,
       is_pregnant, 
       is_senior_citizen,
       is_birth_registered,
+      is_profile_complete,
       search,
       page = 1,
       limit = 50
@@ -272,9 +404,11 @@ router.get("/", async (req, res, next) => {
 
     if (age_category) where.age_category = age_category;
     if (is_4ps_member !== undefined) where.is_4ps_member = is_4ps_member === 'true';
+    if (is_philhealth_member !== undefined) where.is_philhealth_member = is_philhealth_member === 'true';
     if (is_pregnant !== undefined) where.is_pregnant = is_pregnant === 'true';
     if (is_senior_citizen !== undefined) where.is_senior_citizen = is_senior_citizen === 'true';
     if (is_birth_registered !== undefined) where.is_birth_registered = is_birth_registered === 'true';
+    if (is_profile_complete !== undefined) where.is_profile_complete = is_profile_complete === 'false' ? false : true;
     
     if (search) {
       where.OR = [
@@ -284,13 +418,47 @@ router.get("/", async (req, res, next) => {
       ];
     }
     
+    const requestedLimit = parseInt(limit);
+    
+    // For very large limits (>1000), don't include relations to avoid timeout
+    const includeRelations = requestedLimit <= 1000;
+    
+    const queryOptions = {
+      where,
+      orderBy: { created_at: 'desc' },
+      skip: (parseInt(page) - 1) * requestedLimit,
+      take: requestedLimit
+    };
+    
+    // Only include heavy relations for reasonable page sizes
+    if (!includeRelations) {
+      queryOptions.select = {
+        resident_id: true,
+        first_name: true,
+        middle_name: true,
+        last_name: true,
+        full_name: true,
+        date_of_birth: true,
+        age: true,
+        gender: true,
+        phone: true,
+        barangay: true,
+        address: true,
+        is_4ps_member: true,
+        is_philhealth_member: true,
+        philhealth_number: true,
+        is_pregnant: true,
+        is_senior_citizen: true,
+        is_birth_registered: true,
+        is_profile_complete: true,
+        age_category: true,
+        created_at: true,
+        updated_at: true
+      };
+    }
+    
     const [residents, total] = await Promise.all([
-      prisma.residents.findMany({
-        where,
-        orderBy: { created_at: 'desc' },
-        skip: (parseInt(page) - 1) * parseInt(limit),
-        take: parseInt(limit)
-      }),
+      prisma.residents.findMany(queryOptions),
       prisma.residents.count({ where })
     ]);
     
@@ -299,14 +467,23 @@ router.get("/", async (req, res, next) => {
       data: residents,
       pagination: {
         page: parseInt(page),
-        limit: parseInt(limit),
+        limit: requestedLimit,
         total,
-        totalPages: Math.ceil(total / parseInt(limit))
+        totalPages: Math.ceil(total / requestedLimit)
       },
       barangay: user?.assigned_barangay || 'ALL'
     });
   } catch (error) {
     console.error('Error fetching residents:', error);
+    
+    // Provide more helpful error information
+    if (error.code === 'P2024') {
+      return res.status(504).json({ 
+        error: 'Database query timeout',
+        message: 'The request took too long. Try reducing the limit or filtering by barangay.'
+      });
+    }
+    
     next(error);
   }
 });
@@ -577,64 +754,6 @@ router.delete("/:id", async (req, res, next) => {
     if (err.code === "P2025") {
       return res.status(404).json({ error: "Resident not found" });
     }
-    next(err);
-  }
-});
-
-/**
- * GET /api/residents/compare/barangays
- * Compare resident demographics across barangays (admin only)
- */
-router.get("/compare/barangays", async (req, res, next) => {
-  try {
-    const user = req.user || null;
-
-    if (user && user.role !== 'ADMIN' && user.role !== 'MUNICIPAL_STAFF') {
-      return res.status(403).json({ error: 'Access denied' });
-    }
-
-    const comparison = await prisma.residents.groupBy({
-      by: ['barangay'],
-      where: { is_active: true },
-      _count: {
-        resident_id: true
-      }
-    });
-
-    const detailedStats = await Promise.all(
-      comparison.map(async (item) => {
-        const [fourPs, pregnant, senior, birthReg] = await Promise.all([
-          prisma.residents.count({ 
-            where: { barangay: item.barangay, is_4ps_member: true, is_active: true } 
-          }),
-          prisma.residents.count({ 
-            where: { barangay: item.barangay, is_pregnant: true, is_active: true } 
-          }),
-          prisma.residents.count({ 
-            where: { barangay: item.barangay, is_senior_citizen: true, is_active: true } 
-          }),
-          prisma.residents.count({ 
-            where: { barangay: item.barangay, is_birth_registered: true, is_active: true } 
-          })
-        ]);
-
-        return {
-          barangay: item.barangay,
-          total: item._count.resident_id,
-          fourPsMembers: fourPs,
-          pregnant: pregnant,
-          seniorCitizens: senior,
-          birthRegistered: birthReg
-        };
-      })
-    );
-
-    res.json({ 
-      success: true, 
-      data: detailedStats 
-    });
-  } catch (err) {
-    console.error('Compare barangays error:', err);
     next(err);
   }
 });
