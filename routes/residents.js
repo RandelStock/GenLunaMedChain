@@ -24,7 +24,7 @@ function isSeniorCitizen(age) {
 }
 
 // ============================================
-// NEW: CHECK FOR DUPLICATE RESIDENTS
+// CHECK FOR DUPLICATE RESIDENTS
 // ============================================
 
 /**
@@ -104,13 +104,12 @@ router.post("/check-duplicate", async (req, res, next) => {
 });
 
 // ============================================
-// NEW: OPTIMIZED EXPORT ENDPOINT
+// OPTIMIZED EXPORT ENDPOINT
 // ============================================
 
 /**
  * GET /api/residents/export/all
  * Optimized endpoint for exporting all residents without heavy relations
- * This endpoint is specifically designed to handle large datasets for PDF/CSV exports
  */
 router.get("/export/all", async (req, res, next) => {
   try {
@@ -164,7 +163,6 @@ router.get("/export/all", async (req, res, next) => {
   } catch (error) {
     console.error('Error exporting residents:', error);
     
-    // Return a more specific error
     res.status(500).json({ 
       error: 'Failed to export residents',
       message: error.message,
@@ -174,11 +172,12 @@ router.get("/export/all", async (req, res, next) => {
 });
 
 // ============================================
-// EXISTING ROUTES
+// STATISTICS ENDPOINTS
 // ============================================
 
 /**
- * GET statistics for dashboard widgets with barangay filtering
+ * GET /api/residents/statistics
+ * Get statistics for dashboard widgets with barangay filtering
  */
 router.get("/statistics", async (req, res, next) => {
   try {
@@ -246,7 +245,8 @@ router.get("/statistics", async (req, res, next) => {
 });
 
 /**
- * GET barangay-specific statistics
+ * GET /api/residents/statistics/barangay/:barangay
+ * Get barangay-specific statistics
  */
 router.get("/statistics/barangay/:barangay", async (req, res, next) => {
   try {
@@ -317,7 +317,6 @@ router.get("/statistics/barangay/:barangay", async (req, res, next) => {
 /**
  * GET /api/residents/compare/barangays
  * Compare resident demographics across barangays (admin only)
- * NOTE: Moved before the generic GET "/" route to prevent route conflicts
  */
 router.get("/compare/barangays", async (req, res, next) => {
   try {
@@ -373,9 +372,13 @@ router.get("/compare/barangays", async (req, res, next) => {
   }
 });
 
+// ============================================
+// CRUD ENDPOINTS
+// ============================================
+
 /**
- * GET all residents with filters and barangay access control
- * UPDATED: Optimized for large datasets
+ * GET /api/residents
+ * Get all residents with filters and barangay access control
  */
 router.get("/", async (req, res, next) => {
   try {
@@ -489,7 +492,8 @@ router.get("/", async (req, res, next) => {
 });
 
 /**
- * GET resident by ID with medical records and medicine releases
+ * GET /api/residents/:id
+ * Get resident by ID with medical records, consultations, and medicine releases
  */
 router.get("/:id", async (req, res, next) => {
   try {
@@ -498,6 +502,25 @@ router.get("/:id", async (req, res, next) => {
     const resident = await prisma.residents.findUnique({
       where: { resident_id: Number(req.params.id) },
       include: {
+        // Include consultations linked to this resident
+        consultations: {
+          orderBy: { scheduled_date: 'desc' },
+          take: 20, // Last 20 consultations
+          include: {
+            assigned_doctor: {
+              select: {
+                full_name: true,
+                email: true
+              }
+            },
+            assigned_nurse: {
+              select: {
+                full_name: true,
+                email: true
+              }
+            }
+          }
+        },
         // Include medicine releases if the table exists
         medicine_releases: {
           orderBy: { date_released: 'desc' },
@@ -535,7 +558,8 @@ router.get("/:id", async (req, res, next) => {
 });
 
 /**
- * POST new resident with duplicate check
+ * POST /api/residents
+ * Create new resident with duplicate check
  */
 router.post("/", async (req, res, next) => {
   try {
@@ -635,7 +659,8 @@ router.post("/", async (req, res, next) => {
 });
 
 /**
- * PUT update resident with barangay access check
+ * PUT /api/residents/:id
+ * Update resident with barangay access check
  */
 router.put("/:id", async (req, res, next) => {
   try {
@@ -711,7 +736,8 @@ router.put("/:id", async (req, res, next) => {
 });
 
 /**
- * DELETE resident with barangay access check
+ * DELETE /api/residents/:id
+ * Soft delete resident with barangay access check
  */
 router.delete("/:id", async (req, res, next) => {
   try {
