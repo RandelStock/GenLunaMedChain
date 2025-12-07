@@ -1,4 +1,4 @@
-// backend/routes/medicines.js - FIXED VERSION
+// backend/routes/medicines.js
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
 import { ethers } from 'ethers';
@@ -12,7 +12,7 @@ const prisma = new PrismaClient();
 // HELPER FUNCTIONS
 // ============================================
 
-// FIXED: Generate hash with FIXED timestamp (not Date.now())
+// Helper function to generate hash (same as frontend)
 const generateMedicineHash = (medicineData) => {
   const dataString = JSON.stringify({
     name: medicineData.name,
@@ -20,173 +20,89 @@ const generateMedicineHash = (medicineData) => {
     quantity: medicineData.quantity,
     expirationDate: medicineData.expirationDate,
     location: medicineData.location,
-    timestamp: medicineData.timestamp, // Use provided timestamp, NOT Date.now()
+    timestamp: medicineData.timestamp || Date.now(),
   });
 
   return ethers.utils.keccak256(ethers.utils.toUtf8Bytes(dataString));
 };
 
 // ============================================
-// POST /api/medicines - FIXED VERSION
+// ROUTES
 // ============================================
-router.post('/', async (req, res) => {
+
+/**
+ * GET /api/medicines
+ * Get all medicines with optional barangay filtering
+ */
+router.get('/', async (req, res) => {
   try {
-    const {
-      medicine_name,
-      medicine_type,
-      description,
-      generic_name,
-      dosage_form,
-      strength,
-      manufacturer,
-      category,
-      storage_requirements,
-      batch_number,
-      quantity,
-      unit_cost,
-      supplier_name,
-      date_received,
-      expiry_date,
-      storage_location,
-      wallet_address,
-      barangay,
-      blockchain_hash, // NEW: Accept hash from frontend
-      blockchain_tx_hash // NEW: Accept tx hash from frontend
-    } = req.body;
-
-    // Validate required fields
-    if (!medicine_name || !batch_number || !quantity || !expiry_date) {
-      return res.status(400).json({ 
-        error: 'Missing required fields: medicine_name, batch_number, quantity, expiry_date' 
-      });
-    }
-
-    // Validate quantity
-    const parsedQuantity = parseInt(quantity);
-    if (isNaN(parsedQuantity) || parsedQuantity <= 0) {
-      return res.status(400).json({ error: 'Quantity must be a positive number' });
-    }
-
-    // Validate expiry date
-    const expiryDateObj = new Date(expiry_date);
-    if (isNaN(expiryDateObj.getTime())) {
-      return res.status(400).json({ error: 'Invalid expiry date' });
-    }
-
-    // Determine barangay assignment
+    // Get user from request (if auth is implemented)
     const user = req.user || null;
-    let assignedBarangay = barangay;
+    const barangayFilter = getBarangayFilter(user);
 
-    if (user && user.role !== 'ADMIN' && user.role !== 'MUNICIPAL_STAFF') {
-      assignedBarangay = user.assigned_barangay;
-    }
+    // Optional filters from query params
+    const { search, category, is_active, page = 1, limit = 50 } = req.query;
 
-    if (!assignedBarangay) {
-      assignedBarangay = 'MUNICIPAL';
-    }
+    const where = {
+      ...barangayFilter,
+      ...(search && {
+        OR: [
+          { medicine_name: { contains: search, mode: 'insensitive' } },
+          { generic_name: { contains: search, mode: 'insensitive' } }
+        ]
+      }),
+      ...(category && { category }),
+      is_active: is_active !== undefined ? is_active === 'true' : true
+    };
 
-    // Check if batch number already exists
-    const existingMedicine = await prisma.medicine_records.findFirst({
-      where: {
-        medicine_name,
-        medicine_stocks: {
-          some: {
-            batch_number,
-            is_active: true
-          }
-        }
-      }
-    });
-
-    if (existingMedicine) {
-      return res.status(400).json({ 
-        error: 'Batch number already exists for this medicine' 
-      });
-    }
-
-    // Create medicine record with blockchain info
-    const medicine = await prisma.medicine_records.create({
-      data: {
-        medicine_name,
-        medicine_type: medicine_type || 'General',
-        description,
-        generic_name,
-        dosage_form,
-        strength,
-        manufacturer,
-        category,
-        storage_requirements,
-        barangay: assignedBarangay,
-        blockchain_hash: blockchain_hash || null, // Store hash from frontend
-        blockchain_tx_hash: blockchain_tx_hash || null, // Store tx hash
-        blockchain_status: blockchain_hash ? 'CONFIRMED' : 'PENDING',
-        created_by: user?.user_id || null,
-        is_active: true,
-        created_at: new Date(),
-        last_synced_at: blockchain_hash ? new Date() : null
-      }
-    });
-
-    // Create stock record
-    const stock = await prisma.medicine_stocks.create({
-      data: {
-        medicine_id: medicine.medicine_id,
-        batch_number,
-        quantity: parsedQuantity,
-        remaining_quantity: parsedQuantity,
-        unit_cost: parseFloat(unit_cost) || 0,
-        total_cost: (parseFloat(unit_cost) || 0) * parsedQuantity,
-        supplier_name,
-        date_received: new Date(date_received || Date.now()),
-        expiry_date: expiryDateObj,
-        storage_location: storage_location || 'Main Storage',
-        is_active: true,
-        added_by_wallet: wallet_address,
-        blockchain_hash: blockchain_hash || null,
-        blockchain_tx_hash: blockchain_tx_hash || null,
-        blockchain_status: blockchain_hash ? 'CONFIRMED' : 'PENDING',
-        added_by_user_id: user?.user_id || null,
-        created_at: new Date(),
-        last_synced_at: blockchain_hash ? new Date() : null
-      }
-    });
-
-    // NEW: Log blockchain transaction if hash was provided
-    if (blockchain_tx_hash) {
-      try {
-        await prisma.blockchain_transactions.create({
-          data: {
-            tx_hash: blockchain_tx_hash,
-            contract_address: process.env.CONTRACT_ADDRESS,
-            action_type: 'CREATE',
-            entity_type: 'MEDICINE',
-            entity_id: medicine.medicine_id,
-            from_address: wallet_address,
-            barangay: assignedBarangay,
-            status: 'CONFIRMED',
-            confirmed_at: new Date(),
-            event_data: { 
-              medicine_name, 
-              batch_number,
-              blockchain_hash 
+    const [medicines, total] = await Promise.all([
+      prisma.medicine_records.findMany({
+        where,
+        include: {
+          created_by_user: {
+            select: { full_name: true, wallet_address: true }
+          },
+          medicine_stocks: {
+            where: { is_active: true },
+            select: {
+              stock_id: true,
+              batch_number: true,
+              quantity: true,
+              remaining_quantity: true,
+              expiry_date: true,
+              storage_location: true
             }
           }
-        });
-      } catch (txErr) {
-        console.error('Failed to log blockchain transaction:', txErr);
-        // Don't fail the request if logging fails
-      }
-    }
+        },
+        orderBy: { created_at: 'desc' },
+        skip: (parseInt(page) - 1) * parseInt(limit),
+        take: parseInt(limit)
+      }),
+      prisma.medicine_records.count({ where })
+    ]);
 
-    res.status(201).json({
+    // Calculate total stock for each medicine
+    const medicinesWithStats = medicines.map(med => ({
+      ...med,
+      total_stock: med.medicine_stocks.reduce((sum, stock) => sum + stock.remaining_quantity, 0),
+      active_batches: med.medicine_stocks.length,
+      expired_batches: med.medicine_stocks.filter(s => new Date(s.expiry_date) < new Date()).length
+    }));
+
+    res.json({
       success: true,
-      medicine,
-      stock,
-      message: `Medicine created for ${assignedBarangay}`
+      data: medicinesWithStats,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        totalPages: Math.ceil(total / parseInt(limit))
+      },
+      barangay: user?.assigned_barangay || 'ALL',
+      userRole: user?.role || 'GUEST'
     });
-
   } catch (error) {
-    console.error('Error creating medicine:', error);
+    console.error('Error fetching medicines:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -398,7 +314,6 @@ router.post('/', async (req, res) => {
         category,
         storage_requirements,
         barangay: assignedBarangay, // NEW: Assign barangay
-        blockchain_status: 'PENDING',
         created_by: user?.user_id || null,
         is_active: true,
         created_at: new Date()
@@ -420,7 +335,6 @@ router.post('/', async (req, res) => {
         storage_location: storage_location || 'Main Storage',
         is_active: true,
         added_by_wallet: wallet_address,
-        blockchain_status: 'PENDING',
         added_by_user_id: user?.user_id || null,
         created_at: new Date()
       }

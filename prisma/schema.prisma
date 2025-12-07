@@ -162,7 +162,6 @@ model medicine_records {
   blockchain_hash    String? @unique @db.VarChar(66)
   blockchain_tx_hash String? @db.VarChar(66)
   transaction_hash   String? @db.VarChar(66)
-  blockchain_status  TxStatus @default(PENDING)
 
   created_at      DateTime  @default(now())
   created_by      Int?
@@ -222,7 +221,6 @@ model medicine_stocks {
   blockchain_hash    String?   @db.VarChar(66)
   blockchain_tx_hash String?   @db.VarChar(66)
   added_by_wallet    String?   @db.VarChar(42)
-  blockchain_status  TxStatus  @default(PENDING)
   added_by_user_id   Int?
   added_by_user      users?    @relation(fields: [added_by_user_id], references: [user_id], name: "medicine_stocks_added_by")
   created_at         DateTime  @default(now())
