@@ -129,6 +129,7 @@ router.post('/', async (req, res) => {
         storage_location: storage_location || 'Main Storage',
         is_active: true,
         added_by_wallet,
+        blockchain_status: 'PENDING',
         created_at: new Date()
       }
     });

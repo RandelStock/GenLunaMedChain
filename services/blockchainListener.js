@@ -214,6 +214,23 @@ class BlockchainListener {
 
       console.log("✅ Blockchain transaction logged for medicine:", eventData.index);
 
+      // Update medicine record to reflect on-chain confirmation
+      try {
+        await prisma.medicine_records.update({
+          where: { medicine_id: eventData.index },
+          data: {
+            blockchain_tx_hash: eventData.transactionHash,
+            last_synced_at: new Date(),
+            blockchain_status: 'CONFIRMED'
+          }
+        });
+
+        console.log(`🔁 medicine_records#${eventData.index} marked CONFIRMED`);
+      } catch (updateErr) {
+        // Log but don't throw; we'll still have the blockchain_transactions record
+        console.error('❌ Failed to mark medicine as CONFIRMED:', updateErr.message);
+      }
+
     } catch (error) {
       console.error("❌ Error handling medicine added event:", error);
       throw error;

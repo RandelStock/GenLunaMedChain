@@ -187,6 +187,45 @@ class BlockchainService {
         },
       });
 
+      // Update related entity records to mark them as confirmed on-chain
+      try {
+        if (entity_type === 'MEDICINE' && entity_id) {
+          await prisma.medicine_records.update({
+            where: { medicine_id: entity_id },
+            data: {
+              blockchain_tx_hash: tx_hash,
+              blockchain_hash: event_data.dataHash || event_data.newHash || event_data.dataHash || null,
+              last_synced_at: new Date(),
+              blockchain_status: 'CONFIRMED'
+            }
+          });
+        }
+
+        if (entity_type === 'REMOVAL' && entity_id) {
+          await prisma.stock_removals.update({
+            where: { removal_id: entity_id },
+            data: {
+              blockchain_tx_hash: tx_hash,
+              blockchain_hash: event_data.dataHash || null,
+              last_synced_at: new Date()
+            }
+          });
+        }
+
+        if (entity_type === 'RECEIPT' && entity_id) {
+          await prisma.medicine_releases.update({
+            where: { release_id: entity_id },
+            data: {
+              blockchain_tx_hash: tx_hash,
+              blockchain_hash: event_data.dataHash || null,
+              last_synced_at: new Date()
+            }
+          });
+        }
+      } catch (entityUpdateErr) {
+        console.error('❌ Error updating entity after saving blockchain event:', entityUpdateErr.message);
+      }
+
       console.log(`✅ Saved event: ${action_type} ${entity_type} ${entity_id}`);
     } catch (err) {
       console.error("❌ Error saving event to DB:", err.message);

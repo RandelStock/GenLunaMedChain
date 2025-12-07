@@ -314,6 +314,7 @@ router.post('/', async (req, res) => {
         category,
         storage_requirements,
         barangay: assignedBarangay, // NEW: Assign barangay
+        blockchain_status: 'PENDING',
         created_by: user?.user_id || null,
         is_active: true,
         created_at: new Date()
@@ -335,6 +336,7 @@ router.post('/', async (req, res) => {
         storage_location: storage_location || 'Main Storage',
         is_active: true,
         added_by_wallet: wallet_address,
+        blockchain_status: 'PENDING',
         added_by_user_id: user?.user_id || null,
         created_at: new Date()
       }

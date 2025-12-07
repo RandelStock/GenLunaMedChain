@@ -6,6 +6,7 @@ import { dirname, join } from "path";
 import fs from "fs";
 import prisma from "../config/prismaClient.js";
 import NodeCache from "node-cache";
+import blockchainListener from "../services/blockchainListener.js";
 
 // Initialize cache with 5 minute TTL
 const hashCache = new NodeCache({ stdTTL: 300 });
@@ -539,6 +540,39 @@ router.post("/invalidate-cache", async (req, res) => {
       success: false,
       error: "Failed to invalidate cache"
     });
+  }
+});
+
+
+/**
+ * ----------------------------------------------------------------
+ * POST /blockchain/sync-past
+ * Trigger a one-time sync of past events from a specific block
+ * Body: { fromBlock?: number }
+ * ----------------------------------------------------------------
+ */
+router.post('/sync-past', async (req, res, next) => {
+  try {
+    if (!process.env.RPC_URL || !process.env.CONTRACT_ADDRESS) {
+      return res.status(400).json({ success: false, error: 'RPC_URL and CONTRACT_ADDRESS must be set in environment' });
+    }
+
+    const fromBlock = req.body?.fromBlock !== undefined ? parseInt(req.body.fromBlock) : 0;
+
+    // Initialize listener if not already initialized
+    try {
+      await blockchainListener.initialize(process.env.RPC_URL, process.env.CONTRACT_ADDRESS);
+    } catch (initErr) {
+      console.error('Error initializing blockchain listener for sync:', initErr.message);
+      // continue - syncPastEvents will check contract presence
+    }
+
+    await blockchainListener.syncPastEvents(fromBlock);
+
+    res.json({ success: true, message: `Sync started from block ${fromBlock}` });
+  } catch (error) {
+    console.error('Error triggering sync-past:', error);
+    next(error);
   }
 });
 

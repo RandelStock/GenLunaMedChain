@@ -24,6 +24,7 @@ import providerProfilesRoutes from "./routes/providerProfiles.js";
 
 // Services
 import blockchainService from "./utils/blockchainUtils.js";  // ✅ Added
+import blockchainListener from "./services/blockchainListener.js"; // polling listener (more reliable)
 import { optionalAuth } from "./middleware/auth.js";
 // import blockchainListener from "./services/blockchainListener.js"; // optional legacy
 
@@ -94,7 +95,7 @@ prisma.$connect()
   });
 
 const PORT = process.env.PORT || 4000;
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, async () => {
   console.log(`✅ API running on http://localhost:${PORT}`);
   console.log(
     `📊 Database: ${
@@ -102,23 +103,29 @@ const server = app.listen(PORT, () => {
     }`
   );
 
-  // ✅ Blockchain event listener - DISABLED to prevent filter errors
-  console.log("⚠️  Blockchain event listener disabled (prevents RPC filter errors)");
+  // ✅ Blockchain event listener (polling) - enable when CONTRACT_ADDRESS & RPC_URL set
   console.log("✅ Blockchain service available for transactions");
-  
-  // Event listener disabled - uncomment below to re-enable
-  /*
   try {
     if (process.env.BLOCKCHAIN_NETWORK && process.env.BLOCKCHAIN_NETWORK !== 'disabled') {
-      blockchainService.listenToBlockchainEvents();
-      console.log("👂 Blockchain service listener active");
+      const RPC_URL = process.env.RPC_URL || 'http://127.0.0.1:8545';
+      const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;
+      if (CONTRACT_ADDRESS) {
+        const initialized = await blockchainListener.initialize(RPC_URL, CONTRACT_ADDRESS);
+        if (initialized) {
+          blockchainListener.startListening();
+          console.log('👂 Blockchain polling listener active');
+        } else {
+          console.log('⚠️ Blockchain listener failed to initialize');
+        }
+      } else {
+        console.log('⚠️ No CONTRACT_ADDRESS found. Blockchain listener not started.');
+      }
     } else {
-      console.log("⚠️ Blockchain service disabled (BLOCKCHAIN_NETWORK=disabled or not set)");
+      console.log("⚠️ Blockchain listener disabled (BLOCKCHAIN_NETWORK=disabled or not set)");
     }
   } catch (error) {
-    console.log("⚠️ Blockchain service failed to start:", error.message);
+    console.log('⚠️ Blockchain listener failed to start:', error.message);
   }
-  */
 
   // --- OPTIONAL: Old blockchainListener style ---
   // const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;
