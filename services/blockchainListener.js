@@ -1,7 +1,25 @@
 // backend/services/blockchainListener.js
 import { ethers } from "ethers";
 import { PrismaClient } from "@prisma/client";
-import ContractABI from "../contracts/MedicineInventory.json" assert { type: "json" };
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Load contract ABI (Node.js v22 compatible - no import assertion)
+let ContractABI = { abi: [] };
+try {
+  const abiPath = path.join(__dirname, "../contracts/MedicineInventory.json");
+  const abiData = fs.readFileSync(abiPath, "utf8");
+  ContractABI = JSON.parse(abiData);
+  if (!ContractABI.abi) {
+    ContractABI.abi = ContractABI;
+  }
+} catch (err) {
+  console.error("❌ Failed to load contract ABI:", err.message);
+}
 
 const prisma = new PrismaClient();
 
@@ -20,7 +38,7 @@ class BlockchainListener {
   async initialize(rpcUrl, contractAddress) {
     try {
       this.provider = new ethers.providers.JsonRpcProvider(rpcUrl || "http://127.0.0.1:8545");
-      this.contract = new ethers.Contract(contractAddress, ContractABI.abi, this.provider);
+      this.contract = new ethers.Contract(contractAddress, ContractABI.abi || ContractABI, this.provider);
       
       console.log("✅ Blockchain listener initialized");
       console.log("📍 Contract:", contractAddress);
