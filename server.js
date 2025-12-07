@@ -127,6 +127,7 @@ const server = app.listen(PORT, async () => {
     console.log('⚠️ Blockchain listener failed to start:', error.message);
   }
 
+
   // --- OPTIONAL: Old blockchainListener style ---
   // const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;
   // const RPC_URL = process.env.RPC_URL || "http://127.0.0.1:8545";

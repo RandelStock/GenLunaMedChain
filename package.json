@@ -12,6 +12,7 @@
     "db:generate": "npx prisma generate",
     "db:push": "npx prisma db push",
     "sync:blockchain": "node scripts/sync-blockchain.js",
+    "grant:staff-role": "node scripts/grant-staff-role.js",
     "db:seed": "npx prisma db seed",
     "db:reset": "npx prisma migrate reset --force",
     "db:migrate": "npx prisma migrate deploy"
