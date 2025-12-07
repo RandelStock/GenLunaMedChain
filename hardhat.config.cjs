@@ -35,7 +35,7 @@ module.exports = {
       gas: 500000
     },
     // Even cheaper alternatives
-    polygonAmoy: {
+    amoy: {
       url: "https://rpc-amoy.polygon.technology/",
       accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
       chainId: 80002,
