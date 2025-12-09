@@ -243,6 +243,7 @@ model stock_transactions {
   quantity_after      Int
   transaction_date    DateTime
   performed_by_wallet String?
+  blockchain_hash     String? 
   blockchain_tx_hash  String?
   notes               String?
   created_at          DateTime @default(now())
@@ -251,6 +252,8 @@ model stock_transactions {
 
   @@index([stock_id])
   @@index([transaction_date])
+  @@index([blockchain_tx_hash]) 
+  @@index([blockchain_hash])  
 }
 
 // ---------------------------

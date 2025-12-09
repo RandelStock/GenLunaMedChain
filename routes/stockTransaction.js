@@ -13,12 +13,142 @@ const hashCache = new NodeCache({ stdTTL: 300 });
 
 /**
  * ----------------------------------------------------------------
+ * GET /stock-transactions/stats/summary
+ * Get transaction statistics
+ * ⚠️ IMPORTANT: This must be BEFORE the /:id route
+ * ----------------------------------------------------------------
+ */
+router.get('/stats/summary', async (req, res, next) => {
+  try {
+    const user = req.user || null;
+    const barangayFilter = getBarangayFilter(user);
+    
+    const { start_date, end_date } = req.query;
+    
+    const where = {
+      stock: {
+        medicine: barangayFilter
+      }
+    };
+
+    if (start_date || end_date) {
+      where.transaction_date = {};
+      if (start_date) where.transaction_date.gte = new Date(start_date);
+      if (end_date) where.transaction_date.lte = new Date(end_date);
+    }
+
+    const [additionStats, removalStats, onChainCount] = await Promise.all([
+      prisma.stock_transactions.aggregate({
+        where: {
+          ...where,
+          transaction_type: 'ADDITION'
+        },
+        _sum: {
+          quantity_changed: true
+        },
+        _count: true
+      }),
+      prisma.stock_transactions.aggregate({
+        where: {
+          ...where,
+          transaction_type: 'REMOVAL'
+        },
+        _sum: {
+          quantity_changed: true
+        },
+        _count: true
+      }),
+      prisma.stock_transactions.count({
+        where: {
+          ...where,
+          blockchain_tx_hash: {
+            not: null
+          }
+        }
+      })
+    ]);
+
+    res.json({
+      success: true,
+      stats: {
+        additions: {
+          count: additionStats._count,
+          totalQuantity: additionStats._sum.quantity_changed || 0
+        },
+        removals: {
+          count: removalStats._count,
+          totalQuantity: removalStats._sum.quantity_changed || 0
+        },
+        onChainCount,
+        totalTransactions: additionStats._count + removalStats._count
+      },
+      barangay: user?.assigned_barangay || 'ALL'
+    });
+  } catch (error) {
+    console.error('Error fetching transaction stats:', error);
+    next(error);
+  }
+});
+
+/**
+ * ----------------------------------------------------------------
+ * GET /stock-transactions/stock/:stock_id
+ * Get all transactions for a specific stock
+ * ⚠️ IMPORTANT: This must be BEFORE the /:id route
+ * ----------------------------------------------------------------
+ */
+router.get('/stock/:stock_id', async (req, res, next) => {
+  try {
+    const stockId = parseInt(req.params.stock_id);
+    const user = req.user || null;
+
+    if (!stockId || isNaN(stockId)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid stock ID'
+      });
+    }
+
+    const barangayFilter = getBarangayFilter(user);
+
+    const transactions = await prisma.stock_transactions.findMany({
+      where: {
+        stock_id: stockId,
+        stock: {
+          medicine: barangayFilter
+        }
+      },
+      include: {
+        stock: {
+          include: {
+            medicine: true
+          }
+        }
+      },
+      orderBy: { transaction_date: 'desc' }
+    });
+
+    res.json({
+      success: true,
+      data: transactions,
+      total: transactions.length
+    });
+  } catch (error) {
+    console.error('Error fetching stock transactions:', error);
+    next(error);
+  }
+});
+
+/**
+ * ----------------------------------------------------------------
  * GET /stock-transactions
  * Get all stock transactions with barangay filtering
  * ----------------------------------------------------------------
  */
 router.get('/', async (req, res, next) => {
   try {
+    console.log('📥 Fetching stock transactions...');
+    
     const user = req.user || null;
     const barangayFilter = getBarangayFilter(user);
     
@@ -71,6 +201,8 @@ router.get('/', async (req, res, next) => {
       prisma.stock_transactions.count({ where })
     ]);
 
+    console.log(`✅ Found ${transactions.length} transactions (total: ${total})`);
+
     res.json({
       success: true,
       data: transactions,
@@ -83,7 +215,7 @@ router.get('/', async (req, res, next) => {
       barangay: user?.assigned_barangay || 'ALL'
     });
   } catch (error) {
-    console.error('Error fetching stock transactions:', error);
+    console.error('❌ Error fetching stock transactions:', error);
     next(error);
   }
 });
@@ -174,7 +306,6 @@ router.post('/', async (req, res, next) => {
       transaction_date,
       performed_by_wallet,
       blockchain_tx_hash,
-      blockchain_hash,
       notes
     } = req.body;
 
@@ -301,7 +432,7 @@ router.post('/', async (req, res, next) => {
 router.patch('/:id/blockchain', async (req, res, next) => {
   try {
     const transactionId = parseInt(req.params.id);
-    const { blockchain_tx_hash } = req.body; // Only need tx_hash, not blockchain_hash
+    const { blockchain_tx_hash } = req.body;
     const user = req.user || null;
 
     console.log(`📝 Updating blockchain info for transaction ${transactionId}`);
@@ -346,8 +477,7 @@ router.patch('/:id/blockchain', async (req, res, next) => {
     const updated = await prisma.stock_transactions.update({
       where: { transaction_id: transactionId },
       data: {
-        blockchain_tx_hash,
-        last_synced_at: new Date()
+        blockchain_tx_hash
       },
       include: {
         stock: {
@@ -388,84 +518,6 @@ router.patch('/:id/blockchain', async (req, res, next) => {
       error: 'Failed to update blockchain info',
       details: error.message 
     });
-  }
-});
-
-/**
- * ----------------------------------------------------------------
- * GET /stock-transactions/stats/summary
- * Get transaction statistics
- * ----------------------------------------------------------------
- */
-router.get('/stats/summary', async (req, res, next) => {
-  try {
-    const user = req.user || null;
-    const barangayFilter = getBarangayFilter(user);
-    
-    const { start_date, end_date } = req.query;
-    
-    const where = {
-      stock: {
-        medicine: barangayFilter
-      }
-    };
-
-    if (start_date || end_date) {
-      where.transaction_date = {};
-      if (start_date) where.transaction_date.gte = new Date(start_date);
-      if (end_date) where.transaction_date.lte = new Date(end_date);
-    }
-
-    const [additionStats, removalStats, onChainCount] = await Promise.all([
-      prisma.stock_transactions.aggregate({
-        where: {
-          ...where,
-          transaction_type: 'ADDITION'
-        },
-        _sum: {
-          quantity_changed: true
-        },
-        _count: true
-      }),
-      prisma.stock_transactions.aggregate({
-        where: {
-          ...where,
-          transaction_type: 'REMOVAL'
-        },
-        _sum: {
-          quantity_changed: true
-        },
-        _count: true
-      }),
-      prisma.stock_transactions.count({
-        where: {
-          ...where,
-          blockchain_tx_hash: {
-            not: null
-          }
-        }
-      })
-    ]);
-
-    res.json({
-      success: true,
-      stats: {
-        additions: {
-          count: additionStats._count,
-          totalQuantity: additionStats._sum.quantity_changed || 0
-        },
-        removals: {
-          count: removalStats._count,
-          totalQuantity: removalStats._sum.quantity_changed || 0
-        },
-        onChainCount,
-        totalTransactions: additionStats._count + removalStats._count
-      },
-      barangay: user?.assigned_barangay || 'ALL'
-    });
-  } catch (error) {
-    console.error('Error fetching transaction stats:', error);
-    next(error);
   }
 });
 
@@ -541,54 +593,6 @@ router.delete('/:id', async (req, res, next) => {
     });
   } catch (error) {
     console.error('Error deleting transaction:', error);
-    next(error);
-  }
-});
-
-/**
- * ----------------------------------------------------------------
- * GET /stock-transactions/stock/:stock_id
- * Get all transactions for a specific stock
- * ----------------------------------------------------------------
- */
-router.get('/stock/:stock_id', async (req, res, next) => {
-  try {
-    const stockId = parseInt(req.params.stock_id);
-    const user = req.user || null;
-
-    if (!stockId || isNaN(stockId)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid stock ID'
-      });
-    }
-
-    const barangayFilter = getBarangayFilter(user);
-
-    const transactions = await prisma.stock_transactions.findMany({
-      where: {
-        stock_id: stockId,
-        stock: {
-          medicine: barangayFilter
-        }
-      },
-      include: {
-        stock: {
-          include: {
-            medicine: true
-          }
-        }
-      },
-      orderBy: { transaction_date: 'desc' }
-    });
-
-    res.json({
-      success: true,
-      data: transactions,
-      total: transactions.length
-    });
-  } catch (error) {
-    console.error('Error fetching stock transactions:', error);
     next(error);
   }
 });
