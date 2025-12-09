@@ -11,6 +11,50 @@ router.get("/test", (req, res) => {
   res.json({ message: "Audit route is working!" });
 });
 
+// Helper to extract barangay from audit row
+const extractBarangay = (log) => {
+  const parseObj = (obj) => {
+    if (!obj) return null;
+    try { return typeof obj === 'string' ? JSON.parse(obj) : obj; } catch { return null; }
+  };
+  const newVals = parseObj(log.new_values);
+  const oldVals = parseObj(log.old_values);
+  const src = newVals || oldVals || {};
+  const tbl = log.table_name;
+  
+  if (tbl === 'medicines' || tbl === 'medicine' || tbl === 'stock_transactions') {
+    const brgy = src.barangay;
+    // Normalize RHU and MUNICIPAL to 'RHU'
+    if (!brgy || brgy.toUpperCase() === 'RHU' || brgy.toUpperCase() === 'MUNICIPAL') {
+      return 'RHU';
+    }
+    return brgy;
+  }
+  if (tbl === 'receipts' || tbl === 'medicine_releases') {
+    // may be nested: medicine.barangay
+    const brgy = (src.medicine && src.medicine.barangay) || src.barangay;
+    if (!brgy || brgy.toUpperCase() === 'RHU' || brgy.toUpperCase() === 'MUNICIPAL') {
+      return 'RHU';
+    }
+    return brgy;
+  }
+  if (tbl === 'stock_removals' || tbl === 'removal' || tbl === 'stocks' || tbl === 'medicine_stocks') {
+    const brgy = (src.medicine && src.medicine.barangay) || src.barangay;
+    if (!brgy || brgy.toUpperCase() === 'RHU' || brgy.toUpperCase() === 'MUNICIPAL') {
+      return 'RHU';
+    }
+    return brgy;
+  }
+  if (tbl === 'residents') {
+    const brgy = src.barangay;
+    if (!brgy || brgy.toUpperCase() === 'RHU' || brgy.toUpperCase() === 'MUNICIPAL') {
+      return 'RHU';
+    }
+    return brgy;
+  }
+  return 'RHU'; // Default to RHU for no specific barangay context
+};
+
 // GET all audit logs with pagination and user info
 router.get("/", async (req, res, next) => {
   try {
@@ -76,53 +120,27 @@ router.get("/", async (req, res, next) => {
       prisma.audit_log.count({ where })
     ]);
 
-    // Helper to extract barangay from audit row
-    const extractBarangay = (log) => {
-      const parseObj = (obj) => {
-        if (!obj) return null;
-        try { return typeof obj === 'string' ? JSON.parse(obj) : obj; } catch { return null; }
-      };
-      const newVals = parseObj(log.new_values);
-      const oldVals = parseObj(log.old_values);
-      const src = newVals || oldVals || {};
-      const tbl = log.table_name;
-      if (tbl === 'medicines' || tbl === 'medicine') {
-        return src.barangay || null;
-      }
-      if (tbl === 'receipts' || tbl === 'medicine_releases') {
-        // may be nested: medicine.barangay
-        return (src.medicine && src.medicine.barangay) || src.barangay || null;
-      }
-      if (tbl === 'stock_removals' || tbl === 'removal' || tbl === 'stocks') {
-        return (src.medicine && src.medicine.barangay) || src.barangay || null;
-      }
-      if (tbl === 'residents') {
-        return src.barangay || null;
-      }
-      return null; // no specific barangay context
-    };
-
     // Attach derived barangay
     const logsWithDerivedBarangay = rawLogs.map((log) => ({
       ...log,
-      derivedBarangay: extractBarangay(log) || null
+      derivedBarangay: extractBarangay(log)
     }));
 
     // Apply scope filters from query
     let scopedLogs = logsWithDerivedBarangay;
     if (scope && scope !== 'all') {
       if (scope === 'RHU') {
-        scopedLogs = scopedLogs.filter((l) => !l.derivedBarangay);
+        scopedLogs = scopedLogs.filter((l) => l.derivedBarangay === 'RHU');
       } else if (scope === 'barangay') {
-        scopedLogs = scopedLogs.filter((l) => barangay ? l.derivedBarangay === barangay : !!l.derivedBarangay);
+        scopedLogs = scopedLogs.filter((l) => barangay ? l.derivedBarangay === barangay : l.derivedBarangay !== 'RHU');
       }
     }
 
     // Enforce user barangay scoping when not admin/municipal
     if (user && user.role !== 'ADMIN' && user.role !== 'MUNICIPAL_STAFF' && user.assigned_barangay) {
-      scopedLogs = logsWithDerivedBarangay.filter((log) => {
+      scopedLogs = scopedLogs.filter((log) => {
         const b = log.derivedBarangay;
-        return b ? b === user.assigned_barangay : true;
+        return b === user.assigned_barangay || b === 'RHU';
       });
     }
 
@@ -236,36 +254,10 @@ router.get("/all", async (req, res, next) => {
       prisma.audit_log.count({ where })
     ]);
 
-    // Helper to extract barangay from audit row
-    const extractBarangay = (log) => {
-      const parseObj = (obj) => {
-        if (!obj) return null;
-        try { return typeof obj === 'string' ? JSON.parse(obj) : obj; } catch { return null; }
-      };
-      const newVals = parseObj(log.new_values);
-      const oldVals = parseObj(log.old_values);
-      const src = newVals || oldVals || {};
-      const tbl = log.table_name;
-      if (tbl === 'medicines' || tbl === 'medicine') {
-        return src.barangay || null;
-      }
-      if (tbl === 'receipts' || tbl === 'medicine_releases') {
-        // may be nested: medicine.barangay
-        return (src.medicine && src.medicine.barangay) || src.barangay || null;
-      }
-      if (tbl === 'stock_removals' || tbl === 'removal' || tbl === 'stocks') {
-        return (src.medicine && src.medicine.barangay) || src.barangay || null;
-      }
-      if (tbl === 'residents') {
-        return src.barangay || null;
-      }
-      return null; // no specific barangay context
-    };
-
     // Attach derived barangay
     const logsWithDerivedBarangay = logs.map((log) => ({
       ...log,
-      derivedBarangay: extractBarangay(log) || null
+      derivedBarangay: extractBarangay(log)
     }));
 
     res.json({
