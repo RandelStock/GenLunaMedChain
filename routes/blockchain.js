@@ -55,11 +55,24 @@ function generateHash(data) {
   return crypto.createHash("sha256").update(JSON.stringify(data)).digest("hex");
 }
 
+// ✅ Helper function to calculate counts
+function calculateCounts(hashes) {
+  return {
+    total: hashes.length,
+    medicines: hashes.filter((h) => h.type === "medicine").length,
+    stocks: hashes.filter((h) => h.type === "stock").length,
+    stock_transactions: hashes.filter((h) => h.type === "stock_transaction").length,
+    receipts: hashes.filter((h) => h.type === "receipt").length,
+    removals: hashes.filter((h) => h.type === "removal").length
+  };
+}
+
 /**
  * ----------------------------------------------------------------
  * GET /blockchain/hashes
- * Fetches all hashes stored in the database
+ * Fetches all hashes stored in the database INCLUDING stock_transactions
  * OPTIMIZED: Uses database instead of direct blockchain queries
+ * 🔥 UPDATED: Now includes stock_transactions
  * ----------------------------------------------------------------
  */
 router.get("/hashes", async (req, res, next) => {
@@ -81,7 +94,7 @@ router.get("/hashes", async (req, res, next) => {
     
     const allHashes = [];
     
-    // Fetch medicine hashes from database
+    // 1. Fetch medicine hashes from database
     const medicineHashes = await prisma.medicine_records.findMany({
       where: {
         blockchain_hash: {
@@ -112,11 +125,12 @@ router.get("/hashes", async (req, res, next) => {
         addedByName: record.created_by_user?.full_name || "Unknown",
         timestamp: Math.floor(new Date(record.created_at).getTime() / 1000),
         exists: true,
-        txHash: record.blockchain_tx_hash || ""
+        txHash: record.blockchain_tx_hash || "",
+        inDatabase: true
       });
     }
     
-    // Fetch stock hashes from database
+    // 2. Fetch stock hashes from database
     const stockHashes = await prisma.medicine_stocks.findMany({
       where: {
         blockchain_hash: {
@@ -147,11 +161,12 @@ router.get("/hashes", async (req, res, next) => {
         addedByName: record.added_by_user?.full_name || "Unknown",
         timestamp: Math.floor(new Date(record.created_at).getTime() / 1000),
         exists: true,
-        txHash: record.blockchain_tx_hash || ""
+        txHash: record.blockchain_tx_hash || "",
+        inDatabase: true
       });
     }
     
-    // Fetch receipt hashes from database
+    // 3. Fetch receipt hashes from database
     const receiptHashes = await prisma.medicine_releases.findMany({
       where: {
         blockchain_hash: {
@@ -182,11 +197,53 @@ router.get("/hashes", async (req, res, next) => {
         addedByName: record.released_by_user?.full_name || "Unknown",
         timestamp: Math.floor(new Date(record.created_at).getTime() / 1000),
         exists: true,
-        txHash: record.blockchain_tx_hash || ""
+        txHash: record.blockchain_tx_hash || "",
+        inDatabase: true
       });
     }
     
-    // Fetch removal hashes from database
+    // 4. 🔥 NEW: Fetch stock_transactions (ADDITIONS and REMOVALS)
+    const stockTransactions = await prisma.stock_transactions.findMany({
+      where: { 
+        blockchain_tx_hash: { 
+          not: null 
+        } 
+      },
+      select: {
+        transaction_id: true,
+        transaction_type: true,
+        blockchain_hash: true,
+        blockchain_tx_hash: true,
+        created_at: true,
+        performed_by_wallet: true,
+        stock: {
+          select: {
+            medicine: {
+              select: {
+                medicine_name: true
+              }
+            }
+          }
+        }
+      }
+    });
+    
+    for (const tx of stockTransactions) {
+      allHashes.push({
+        type: "stock_transaction",
+        recordId: tx.transaction_id,
+        hash: tx.blockchain_hash,
+        addedBy: tx.performed_by_wallet || "Unknown",
+        addedByName: `Stock ${tx.transaction_type}`,
+        timestamp: Math.floor(new Date(tx.created_at).getTime() / 1000),
+        exists: true,
+        txHash: tx.blockchain_tx_hash || "",
+        inDatabase: true,
+        transactionType: tx.transaction_type // ADDITION or REMOVAL
+      });
+    }
+    
+    // 5. Fetch removal hashes from database (old removal system)
     const removalHashes = await prisma.stock_removals.findMany({
       where: {
         blockchain_hash: {
@@ -217,7 +274,8 @@ router.get("/hashes", async (req, res, next) => {
         addedByName: record.removed_by_user?.full_name || "Unknown",
         timestamp: Math.floor(new Date(record.created_at).getTime() / 1000),
         exists: true,
-        txHash: record.blockchain_tx_hash || ""
+        txHash: record.blockchain_tx_hash || "",
+        inDatabase: true
       });
     }
     
@@ -244,17 +302,6 @@ router.get("/hashes", async (req, res, next) => {
     });
   }
 });
-
-// Helper function to calculate counts
-function calculateCounts(hashes) {
-  return {
-    total: hashes.length,
-    medicines: hashes.filter((h) => h.type === "medicine").length,
-    stocks: hashes.filter((h) => h.type === "stock").length,
-    receipts: hashes.filter((h) => h.type === "receipt").length,
-    removals: hashes.filter((h) => h.type === "removal").length
-  };
-}
 
 /**
  * ----------------------------------------------------------------
@@ -305,6 +352,15 @@ router.post("/verify", async (req, res, next) => {
         exists = !!receipt;
         break;
       
+      case "stock_transaction":
+        const transaction = await prisma.stock_transactions.findUnique({
+          where: { transaction_id: parseInt(recordId) },
+          select: { blockchain_hash: true }
+        });
+        dbHash = transaction?.blockchain_hash;
+        exists = !!transaction;
+        break;
+      
       case "removal":
         const removal = await prisma.stock_removals.findUnique({
           where: { removal_id: parseInt(recordId) },
@@ -317,7 +373,7 @@ router.post("/verify", async (req, res, next) => {
       default:
         return res.status(400).json({
           success: false,
-          error: "Invalid type. Must be: medicine, stock, receipt, or removal",
+          error: "Invalid type. Must be: medicine, stock, stock_transaction, receipt, or removal",
         });
     }
 
@@ -422,6 +478,18 @@ router.get("/record/:type/:id", async (req, res, next) => {
         });
         break;
       
+      case "stock_transaction":
+        record = await prisma.stock_transactions.findUnique({
+          where: { transaction_id: recordId },
+          select: {
+            blockchain_hash: true,
+            blockchain_tx_hash: true,
+            created_at: true,
+            performed_by_wallet: true
+          }
+        });
+        break;
+      
       case "removal":
         record = await prisma.stock_removals.findUnique({
           where: { removal_id: recordId },
@@ -454,7 +522,8 @@ router.get("/record/:type/:id", async (req, res, next) => {
     addedBy = record.created_by_user?.wallet_address || 
               record.added_by_user?.wallet_address || 
               record.released_by_user?.wallet_address || 
-              record.removed_by_user?.wallet_address || 
+              record.removed_by_user?.wallet_address ||
+              record.performed_by_wallet ||
               "Unknown";
     timestamp = Math.floor(new Date(record.created_at).getTime() / 1000);
     exists = record.is_active !== undefined ? record.is_active : true;
@@ -497,11 +566,15 @@ router.get("/stats", async (req, res, next) => {
       where: { blockchain_hash: { not: null } }
     });
     
+    const stockTransactionCount = await prisma.stock_transactions.count({
+      where: { blockchain_tx_hash: { not: null } }
+    });
+    
     const removalCount = await prisma.stock_removals.count({
       where: { blockchain_hash: { not: null } }
     });
 
-    const totalRecords = medicineCount + stockCount + receiptCount + removalCount;
+    const totalRecords = medicineCount + stockCount + receiptCount + stockTransactionCount + removalCount;
 
     res.json({
       success: true,
@@ -509,6 +582,7 @@ router.get("/stats", async (req, res, next) => {
         medicineCount,
         stockCount,
         receiptCount,
+        stockTransactionCount,
         removalCount,
         totalRecords
       },
