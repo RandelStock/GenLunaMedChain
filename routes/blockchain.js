@@ -69,10 +69,7 @@ function calculateCounts(hashes) {
 
 /**
  * ----------------------------------------------------------------
- * GET /blockchain/hashes
- * Fetches all hashes stored in the database INCLUDING stock_transactions
- * OPTIMIZED: Uses database instead of direct blockchain queries
- * 🔥 UPDATED: Now includes stock_transactions
+ * 🚀 OPTIMIZED VERSION - Uses single query with joins
  * ----------------------------------------------------------------
  */
 router.get("/hashes", async (req, res, next) => {
@@ -90,34 +87,112 @@ router.get("/hashes", async (req, res, next) => {
       });
     }
     
-    console.log("📊 Fetching blockchain hashes from database");
+    console.log("📊 Fetching blockchain hashes from database (OPTIMIZED)");
+    const startTime = Date.now();
     
-    const allHashes = [];
-    
-    // 1. Fetch medicine hashes from database
-    const medicineHashes = await prisma.medicine_records.findMany({
-      where: {
-        blockchain_hash: {
-          not: null
-        }
-      },
-      select: {
-        medicine_id: true,
-        blockchain_hash: true,
-        blockchain_tx_hash: true,
-        created_at: true,
-        created_by: true,
-        created_by_user: {
-          select: {
-            wallet_address: true,
-            full_name: true
+    // 🚀 OPTIMIZATION 1: Use Promise.all to fetch all data in parallel
+    const [medicineHashes, stockHashes, receiptHashes, stockTransactions, removalHashes] = await Promise.all([
+      // 1. Fetch medicine hashes
+      prisma.medicine_records.findMany({
+        where: { blockchain_hash: { not: null } },
+        select: {
+          medicine_id: true,
+          blockchain_hash: true,
+          blockchain_tx_hash: true,
+          created_at: true,
+          created_by: true,
+          created_by_user: {
+            select: {
+              wallet_address: true,
+              full_name: true
+            }
           }
         }
-      }
-    });
+      }),
+      
+      // 2. Fetch stock hashes
+      prisma.medicine_stocks.findMany({
+        where: { blockchain_hash: { not: null } },
+        select: {
+          stock_id: true,
+          blockchain_hash: true,
+          blockchain_tx_hash: true,
+          created_at: true,
+          added_by_user_id: true,
+          added_by_user: {
+            select: {
+              wallet_address: true,
+              full_name: true
+            }
+          }
+        }
+      }),
+      
+      // 3. Fetch receipt hashes
+      prisma.medicine_releases.findMany({
+        where: { blockchain_hash: { not: null } },
+        select: {
+          release_id: true,
+          blockchain_hash: true,
+          blockchain_tx_hash: true,
+          created_at: true,
+          released_by_user_id: true,
+          released_by_user: {
+            select: {
+              wallet_address: true,
+              full_name: true
+            }
+          }
+        }
+      }),
+      
+      // 4. Fetch stock_transactions
+      prisma.stock_transactions.findMany({
+        where: { blockchain_tx_hash: { not: null } },
+        select: {
+          transaction_id: true,
+          transaction_type: true,
+          blockchain_tx_hash: true,
+          created_at: true,
+          performed_by_wallet: true,
+          quantity_changed: true,
+          quantity_before: true,
+          quantity_after: true,
+          stock: {
+            select: {
+              medicine: {
+                select: {
+                  medicine_name: true
+                }
+              }
+            }
+          }
+        }
+      }),
+      
+      // 5. Fetch removal hashes
+      prisma.stock_removals.findMany({
+        where: { blockchain_hash: { not: null } },
+        select: {
+          removal_id: true,
+          blockchain_hash: true,
+          blockchain_tx_hash: true,
+          created_at: true,
+          removed_by_user_id: true,
+          removed_by_user: {
+            select: {
+              wallet_address: true,
+              full_name: true
+            }
+          }
+        }
+      })
+    ]);
     
-    for (const record of medicineHashes) {
-      allHashes.push({
+    // 🚀 OPTIMIZATION 2: Transform data using map instead of for loops
+    const allHashes = [
+      // Transform medicine hashes
+      ...medicineHashes.map(record => ({
         type: "medicine",
         recordId: record.medicine_id,
         hash: record.blockchain_hash,
@@ -127,33 +202,10 @@ router.get("/hashes", async (req, res, next) => {
         exists: true,
         txHash: record.blockchain_tx_hash || "",
         inDatabase: true
-      });
-    }
-    
-    // 2. Fetch stock hashes from database
-    const stockHashes = await prisma.medicine_stocks.findMany({
-      where: {
-        blockchain_hash: {
-          not: null
-        }
-      },
-      select: {
-        stock_id: true,
-        blockchain_hash: true,
-        blockchain_tx_hash: true,
-        created_at: true,
-        added_by_user_id: true,
-        added_by_user: {
-          select: {
-            wallet_address: true,
-            full_name: true
-          }
-        }
-      }
-    });
-    
-    for (const record of stockHashes) {
-      allHashes.push({
+      })),
+      
+      // Transform stock hashes
+      ...stockHashes.map(record => ({
         type: "stock",
         recordId: record.stock_id,
         hash: record.blockchain_hash,
@@ -163,33 +215,10 @@ router.get("/hashes", async (req, res, next) => {
         exists: true,
         txHash: record.blockchain_tx_hash || "",
         inDatabase: true
-      });
-    }
-    
-    // 3. Fetch receipt hashes from database
-    const receiptHashes = await prisma.medicine_releases.findMany({
-      where: {
-        blockchain_hash: {
-          not: null
-        }
-      },
-      select: {
-        release_id: true,
-        blockchain_hash: true,
-        blockchain_tx_hash: true,
-        created_at: true,
-        released_by_user_id: true,
-        released_by_user: {
-          select: {
-            wallet_address: true,
-            full_name: true
-          }
-        }
-      }
-    });
-    
-    for (const record of receiptHashes) {
-      allHashes.push({
+      })),
+      
+      // Transform receipt hashes
+      ...receiptHashes.map(record => ({
         type: "receipt",
         recordId: record.release_id,
         hash: record.blockchain_hash,
@@ -199,80 +228,29 @@ router.get("/hashes", async (req, res, next) => {
         exists: true,
         txHash: record.blockchain_tx_hash || "",
         inDatabase: true
-      });
-    }
-    
-    // 4. 🔥 NEW: Fetch stock_transactions (ADDITIONS and REMOVALS)
-    const stockTransactions = await prisma.stock_transactions.findMany({
-      where: { 
-        blockchain_tx_hash: { 
-          not: null 
-        } 
-      },
-      select: {
-        transaction_id: true,
-        transaction_type: true,
-        blockchain_tx_hash: true,
-        created_at: true,
-        performed_by_wallet: true,
-        quantity_changed: true,
-        quantity_before: true,
-        quantity_after: true,
-        stock: {
-          select: {
-            medicine: {
-              select: {
-                medicine_name: true
-              }
-            }
-          }
-        }
-      }
-    });
-    
-    for (const tx of stockTransactions) {
-      // Generate hash from transaction data (since blockchain_hash field doesn't exist)
-      const hashData = `${tx.transaction_id}-${tx.transaction_type}-${tx.quantity_changed}-${tx.stock.medicine.medicine_name}`;
-      const generatedHash = crypto.createHash('sha256').update(hashData).digest('hex');
+      })),
       
-      allHashes.push({
-        type: "stock_transaction",
-        recordId: tx.transaction_id,
-        hash: generatedHash,
-        addedBy: tx.performed_by_wallet || "Unknown",
-        addedByName: `Stock ${tx.transaction_type}`,
-        timestamp: Math.floor(new Date(tx.created_at).getTime() / 1000),
-        exists: true,
-        txHash: tx.blockchain_tx_hash || "",
-        inDatabase: true,
-        transactionType: tx.transaction_type // ADDITION or REMOVAL
-      });
-    }
-    
-    // 5. Fetch removal hashes from database (old removal system)
-    const removalHashes = await prisma.stock_removals.findMany({
-      where: {
-        blockchain_hash: {
-          not: null
-        }
-      },
-      select: {
-        removal_id: true,
-        blockchain_hash: true,
-        blockchain_tx_hash: true,
-        created_at: true,
-        removed_by_user_id: true,
-        removed_by_user: {
-          select: {
-            wallet_address: true,
-            full_name: true
-          }
-        }
-      }
-    });
-    
-    for (const record of removalHashes) {
-      allHashes.push({
+      // Transform stock transactions
+      ...stockTransactions.map(tx => {
+        const hashData = `${tx.transaction_id}-${tx.transaction_type}-${tx.quantity_changed}-${tx.stock.medicine.medicine_name}`;
+        const generatedHash = crypto.createHash('sha256').update(hashData).digest('hex');
+        
+        return {
+          type: "stock_transaction",
+          recordId: tx.transaction_id,
+          hash: generatedHash,
+          addedBy: tx.performed_by_wallet || "Unknown",
+          addedByName: `Stock ${tx.transaction_type}`,
+          timestamp: Math.floor(new Date(tx.created_at).getTime() / 1000),
+          exists: true,
+          txHash: tx.blockchain_tx_hash || "",
+          inDatabase: true,
+          transactionType: tx.transaction_type
+        };
+      }),
+      
+      // Transform removal hashes
+      ...removalHashes.map(record => ({
         type: "removal",
         recordId: record.removal_id,
         hash: record.blockchain_hash,
@@ -282,8 +260,8 @@ router.get("/hashes", async (req, res, next) => {
         exists: true,
         txHash: record.blockchain_tx_hash || "",
         inDatabase: true
-      });
-    }
+      }))
+    ];
     
     // Sort by timestamp (newest first)
     allHashes.sort((a, b) => b.timestamp - a.timestamp);
@@ -291,7 +269,8 @@ router.get("/hashes", async (req, res, next) => {
     // Cache the results for 5 minutes
     hashCache.set(cacheKey, allHashes);
 
-    console.log(`✅ Fetched ${allHashes.length} blockchain hashes from database`);
+    const endTime = Date.now();
+    console.log(`✅ Fetched ${allHashes.length} blockchain hashes in ${endTime - startTime}ms`);
 
     // Return the results
     return res.json({
@@ -313,7 +292,6 @@ router.get("/hashes", async (req, res, next) => {
  * ----------------------------------------------------------------
  * POST /blockchain/verify
  * Verifies if a hash matches the one stored in database
- * (Can optionally verify against blockchain if needed)
  * ----------------------------------------------------------------
  */
 router.post("/verify", async (req, res, next) => {
@@ -548,7 +526,7 @@ router.get("/record/:type/:id", async (req, res, next) => {
       });
     }
 
-    hash = record.blockchain_hash;
+    hash = record.blockchain_hash || hash;
     addedBy = record.created_by_user?.wallet_address || 
               record.added_by_user?.wallet_address || 
               record.released_by_user?.wallet_address || 
@@ -579,30 +557,19 @@ router.get("/record/:type/:id", async (req, res, next) => {
 /**
  * ----------------------------------------------------------------
  * GET /blockchain/stats
- * Get blockchain statistics from database
+ * Get blockchain statistics from database (OPTIMIZED)
  * ----------------------------------------------------------------
  */
 router.get("/stats", async (req, res, next) => {
   try {
-    const medicineCount = await prisma.medicine_records.count({
-      where: { blockchain_hash: { not: null } }
-    });
-    
-    const stockCount = await prisma.medicine_stocks.count({
-      where: { blockchain_hash: { not: null } }
-    });
-    
-    const receiptCount = await prisma.medicine_releases.count({
-      where: { blockchain_hash: { not: null } }
-    });
-    
-    const stockTransactionCount = await prisma.stock_transactions.count({
-      where: { blockchain_tx_hash: { not: null } }
-    });
-    
-    const removalCount = await prisma.stock_removals.count({
-      where: { blockchain_hash: { not: null } }
-    });
+    // 🚀 OPTIMIZATION: Use Promise.all for parallel counting
+    const [medicineCount, stockCount, receiptCount, stockTransactionCount, removalCount] = await Promise.all([
+      prisma.medicine_records.count({ where: { blockchain_hash: { not: null } } }),
+      prisma.medicine_stocks.count({ where: { blockchain_hash: { not: null } } }),
+      prisma.medicine_releases.count({ where: { blockchain_hash: { not: null } } }),
+      prisma.stock_transactions.count({ where: { blockchain_tx_hash: { not: null } } }),
+      prisma.stock_removals.count({ where: { blockchain_hash: { not: null } } })
+    ]);
 
     const totalRecords = medicineCount + stockCount + receiptCount + stockTransactionCount + removalCount;
 
