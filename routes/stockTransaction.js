@@ -247,7 +247,6 @@ router.post('/', async (req, res, next) => {
         transaction_date: transaction_date ? new Date(transaction_date) : new Date(),
         performed_by_wallet: performed_by_wallet?.toLowerCase() || null,
         blockchain_tx_hash: blockchain_tx_hash || null,
-        blockchain_hash: blockchain_hash || null,
         notes: notes || null
       },
       include: {
@@ -302,16 +301,15 @@ router.post('/', async (req, res, next) => {
 router.patch('/:id/blockchain', async (req, res, next) => {
   try {
     const transactionId = parseInt(req.params.id);
-    const { blockchain_hash, blockchain_tx_hash } = req.body;
+    const { blockchain_tx_hash } = req.body; // Only need tx_hash, not blockchain_hash
     const user = req.user || null;
 
     console.log(`📝 Updating blockchain info for transaction ${transactionId}`);
 
-    if (!blockchain_hash || !blockchain_tx_hash) {
+    if (!blockchain_tx_hash) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields',
-        required: ['blockchain_hash', 'blockchain_tx_hash']
+        error: 'Missing required field: blockchain_tx_hash'
       });
     }
 
@@ -348,7 +346,6 @@ router.patch('/:id/blockchain', async (req, res, next) => {
     const updated = await prisma.stock_transactions.update({
       where: { transaction_id: transactionId },
       data: {
-        blockchain_hash,
         blockchain_tx_hash,
         last_synced_at: new Date()
       },

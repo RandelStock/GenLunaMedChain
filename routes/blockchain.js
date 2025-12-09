@@ -212,10 +212,12 @@ router.get("/hashes", async (req, res, next) => {
       select: {
         transaction_id: true,
         transaction_type: true,
-        blockchain_hash: true,
         blockchain_tx_hash: true,
         created_at: true,
         performed_by_wallet: true,
+        quantity_changed: true,
+        quantity_before: true,
+        quantity_after: true,
         stock: {
           select: {
             medicine: {
@@ -229,10 +231,14 @@ router.get("/hashes", async (req, res, next) => {
     });
     
     for (const tx of stockTransactions) {
+      // Generate hash from transaction data (since blockchain_hash field doesn't exist)
+      const hashData = `${tx.transaction_id}-${tx.transaction_type}-${tx.quantity_changed}-${tx.stock.medicine.medicine_name}`;
+      const generatedHash = crypto.createHash('sha256').update(hashData).digest('hex');
+      
       allHashes.push({
         type: "stock_transaction",
         recordId: tx.transaction_id,
-        hash: tx.blockchain_hash,
+        hash: generatedHash,
         addedBy: tx.performed_by_wallet || "Unknown",
         addedByName: `Stock ${tx.transaction_type}`,
         timestamp: Math.floor(new Date(tx.created_at).getTime() / 1000),
@@ -355,9 +361,17 @@ router.post("/verify", async (req, res, next) => {
       case "stock_transaction":
         const transaction = await prisma.stock_transactions.findUnique({
           where: { transaction_id: parseInt(recordId) },
-          select: { blockchain_hash: true }
+          select: { blockchain_tx_hash: true }
         });
-        dbHash = transaction?.blockchain_hash;
+        // Generate hash from transaction data
+        if (transaction) {
+          const txData = await prisma.stock_transactions.findUnique({
+            where: { transaction_id: parseInt(recordId) },
+            include: { stock: { include: { medicine: true } } }
+          });
+          const hashData = `${txData.transaction_id}-${txData.transaction_type}-${txData.quantity_changed}-${txData.stock.medicine.medicine_name}`;
+          dbHash = crypto.createHash('sha256').update(hashData).digest('hex');
+        }
         exists = !!transaction;
         break;
       
@@ -482,12 +496,28 @@ router.get("/record/:type/:id", async (req, res, next) => {
         record = await prisma.stock_transactions.findUnique({
           where: { transaction_id: recordId },
           select: {
-            blockchain_hash: true,
             blockchain_tx_hash: true,
             created_at: true,
-            performed_by_wallet: true
+            performed_by_wallet: true,
+            transaction_type: true,
+            quantity_changed: true
+          },
+          include: {
+            stock: {
+              include: {
+                medicine: {
+                  select: { medicine_name: true }
+                }
+              }
+            }
           }
         });
+        
+        // Generate hash from transaction data
+        if (record) {
+          const hashData = `${recordId}-${record.transaction_type}-${record.quantity_changed}-${record.stock.medicine.medicine_name}`;
+          hash = crypto.createHash('sha256').update(hashData).digest('hex');
+        }
         break;
       
       case "removal":
