@@ -13,7 +13,21 @@
     "db:push": "npx prisma db push",
     "db:seed": "npx prisma db seed",
     "db:reset": "npx prisma migrate reset --force",
-    "db:migrate": "npx prisma migrate deploy"
+    "db:migrate": "npx prisma migrate deploy",
+    "db:reset:neon": "node prisma/reset-neon.js",
+    "db:nuke": "node prisma/reset-neon.js && npm run seed:all",
+    "seed:all": "node prisma/seed-all.js",
+    "seed:main": "node prisma/seed.js",
+    "seed:residents": "node prisma/seed-resident.js",
+    "seed:barangay": "node prisma/seed-barangay.js",
+    "seed:suppliers": "node prisma/seed-suppliers.js",
+    "seed:releases": "node prisma/seed-medicine-releases.js",
+    "seed:removals": "node prisma/seed-stock-removals.js",
+    "seed:consultations": "node prisma/seed-consultations.js",
+    "seed:calendar": "node prisma/seed-calendar-events.js",
+    "seed:providers": "node prisma/seed-provider-data.js",
+    "verify:residents": "node prisma/verify-residents.js",
+    "db:fresh": "npm run db:reset && npm run seed:all"
   },
   "devDependencies": {
     "@matterlabs/hardhat-zksync-solc": "^1.1.14",
@@ -40,6 +54,6 @@
     "zksync-ethers": "^5.7.0"
   },
   "prisma": {
-    "seed": "node prisma/seed.js"
+    "seed": "node prisma/seed-all.js"
   }
 }
