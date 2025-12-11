@@ -155,13 +155,6 @@ router.get("/hashes", async (req, res, next) => {
           blockchain_tx_hash: true,
           created_at: true,
           performed_by_wallet: true,
-          performed_by_user_id: true,
-          performed_by_user: {
-            select: {
-              wallet_address: true,
-              full_name: true
-            }
-          },
           quantity_changed: true,
           quantity_before: true,
           quantity_after: true,
@@ -247,7 +240,7 @@ router.get("/hashes", async (req, res, next) => {
           recordId: tx.transaction_id,
           hash: generatedHash,
           addedBy: tx.performed_by_wallet || "Unknown",
-          addedByName: tx.performed_by_user?.full_name || "Unknown",
+          addedByName: tx.performed_by_wallet || "Unknown",
           timestamp: Math.floor(new Date(tx.created_at).getTime() / 1000),
           exists: true,
           txHash: tx.blockchain_tx_hash || "",
