@@ -632,6 +632,17 @@ router.post("/", async (req, res, next) => {
     }
 
     data.barangay = assignedBarangay;
+
+    // Calculate profile completeness
+    data.is_profile_complete = !!(
+      data.first_name && 
+      data.last_name && 
+      data.date_of_birth && 
+      data.gender && 
+      data.barangay && 
+      data.address && 
+      data.phone
+    );
     
     const resident = await prisma.residents.create({ 
       data: data 
@@ -702,6 +713,17 @@ router.put("/:id", async (req, res, next) => {
       data.age_category = calculateAgeCategory(data.age);
       data.is_senior_citizen = isSeniorCitizen(data.age);
     }
+
+    // Calculate profile completeness (separate from age check)
+    data.is_profile_complete = !!(
+      (data.first_name || oldResident.first_name) && 
+      (data.last_name || oldResident.last_name) && 
+      (data.date_of_birth || oldResident.date_of_birth) && 
+      (data.gender || oldResident.gender) && 
+      (data.barangay || oldResident.barangay) && 
+      (data.address || oldResident.address) && 
+      (data.phone || oldResident.phone)
+    );
 
     // Only admin can change barangay assignment
     if (barangay && user && (user.role === 'ADMIN' || user.role === 'MUNICIPAL_STAFF')) {
