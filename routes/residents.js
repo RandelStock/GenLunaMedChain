@@ -642,7 +642,7 @@ router.post("/", async (req, res, next) => {
       recordId: resident.resident_id,
       action: 'INSERT',
       newValues: resident,
-      walletAddress: (req.body && req.body.wallet_address) || req.headers['x-wallet-address'] || null,
+      walletAddress: user?.wallet_address || null,
       ipAddress: getIpAddress(req),
       userAgent: getUserAgent(req)
     });
@@ -719,7 +719,7 @@ router.put("/:id", async (req, res, next) => {
       action: 'UPDATE',
       oldValues: oldResident,
       newValues: resident,
-      walletAddress: (req.body && req.body.wallet_address) || req.headers['x-wallet-address'] || null,
+      walletAddress: user?.wallet_address || null,
       ipAddress: getIpAddress(req),
       userAgent: getUserAgent(req)
     });
@@ -766,7 +766,7 @@ router.delete("/:id", async (req, res, next) => {
       recordId: residentId,
       action: 'DELETE',
       oldValues: oldResident,
-      walletAddress: req.headers['x-wallet-address'] || null,
+      walletAddress: user?.wallet_address || null,
       ipAddress: getIpAddress(req),
       userAgent: getUserAgent(req)
     });

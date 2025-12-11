@@ -22,7 +22,7 @@ const extractBarangay = (log) => {
   const src = newVals || oldVals || {};
   const tbl = log.table_name;
   
-  if (tbl === 'medicines' || tbl === 'medicine' || tbl === 'stock_transactions') {
+  if (tbl === 'medicines' || tbl === 'medicine' || tbl === 'medicine_records' || tbl === 'stock_transactions') {
     const brgy = src.barangay;
     // Normalize RHU and MUNICIPAL to 'RHU'
     if (!brgy || brgy.toUpperCase() === 'RHU' || brgy.toUpperCase() === 'MUNICIPAL') {
@@ -185,7 +185,13 @@ router.get("/record/:table/:id", async (req, res, next) => {
       orderBy: { changed_at: 'desc' }
     });
 
-    res.json(logs);
+    // Attach derived barangay to each log
+    const logsWithDerivedBarangay = logs.map((log) => ({
+      ...log,
+      derivedBarangay: extractBarangay(log)
+    }));
+
+    res.json(logsWithDerivedBarangay);
   } catch (error) {
     console.error('Error fetching record audit logs:', error);
     next(error);
