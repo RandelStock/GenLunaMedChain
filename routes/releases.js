@@ -1,7 +1,7 @@
 // backend/routes/releases.js
 import express from "express";
 import { PrismaClient } from "@prisma/client";
-import { logAudit, getIpAddress, getUserAgent } from "../utils/auditLogger.js";
+import { logAuditFromRequest } from '../utils/auditLogger.js';
 import { getBarangayFilter, canModifyRecord } from '../middleware/baranggayAccess.js';
 // import { authenticateUser } from '../middleware/auth.js';
 
@@ -322,14 +322,13 @@ router.post("/", async (req, res, next) => {
     });
     
     // Log audit entry
-    await logAudit({
-      tableName: 'receipts',
-      recordId: release.release_id,
-      action: 'INSERT',
-      newValues: release,
-      walletAddress: walletAddress || null,
-      ipAddress: getIpAddress(req),
-      userAgent: getUserAgent(req)
+    await logAuditFromRequest({
+      req,
+      tableName: '...',
+      recordId: '...',
+      action: '...',
+      oldValues: '...',
+      newValues: '...',
     }).catch(err => console.error('Audit log failed:', err));
     
     res.status(201).json({
@@ -385,19 +384,13 @@ router.patch("/:id", async (req, res, next) => {
     });
 
     // Log audit entry for blockchain update
-    await logAudit({
-      tableName: 'receipts',
-      recordId: releaseId,
-      action: 'UPDATE',
-      oldValues: existingRelease,
-      newValues: {
-        ...release,
-        blockchain_hash,
-        blockchain_tx_hash
-      },
-      walletAddress: walletAddress || null,
-      ipAddress: getIpAddress(req),
-      userAgent: getUserAgent(req)
+    await logAuditFromRequest({
+      req,
+      tableName: '...',
+      recordId: '...',
+      action: '...',
+      oldValues: '...',
+      newValues: '...',
     }).catch(err => console.error('Audit log failed:', err));
 
     res.json({ success: true, data: release });
@@ -441,15 +434,13 @@ router.put("/:id", async (req, res, next) => {
     });
     
     // Log audit entry
-    await logAudit({
-      tableName: 'receipts',
-      recordId: releaseId,
-      action: 'UPDATE',
-      oldValues: oldRelease,
-      newValues: release,
-      walletAddress: walletAddress || null,
-      ipAddress: getIpAddress(req),
-      userAgent: getUserAgent(req)
+    await logAuditFromRequest({
+      req,
+      tableName: '...',
+      recordId: '...',
+      action: '...',
+      oldValues: '...',
+      newValues: '...',
     }).catch(err => console.error('Audit log failed:', err));
     
     res.json({ success: true, data: release });
@@ -506,14 +497,13 @@ router.delete("/:id", async (req, res, next) => {
     });
     
     // Log audit entry with blockchain info
-    await logAudit({
-      tableName: 'receipts',
-      recordId: releaseId,
-      action: 'DELETE',
-      oldValues: oldRelease,
-      walletAddress: walletAddress || null,
-      ipAddress: getIpAddress(req),
-      userAgent: getUserAgent(req)
+    await logAuditFromRequest({
+      req,
+      tableName: '...',
+      recordId: '...',
+      action: '...',
+      oldValues: '...',
+      newValues: '...',
     }).catch(err => console.error('Audit log failed:', err));
     
     res.json({ 

@@ -1,7 +1,7 @@
 // backend/routes/residents.js
 import express from "express";
 import { PrismaClient } from "@prisma/client";
-import { logAudit, getIpAddress, getUserAgent } from "../utils/auditLogger.js";
+import { logAuditFromRequest } from '../utils/auditLogger.js';
 import { getBarangayFilter, canModifyRecord } from '../middleware/baranggayAccess.js';
 
 const router = express.Router();
@@ -648,15 +648,14 @@ router.post("/", async (req, res, next) => {
       data: data 
     });
     
-    await logAudit({
-      tableName: 'residents',
-      recordId: resident.resident_id,
-      action: 'INSERT',
-      newValues: resident,
-      walletAddress: user?.wallet_address || null,
-      ipAddress: getIpAddress(req),
-      userAgent: getUserAgent(req)
-    });
+    await logAuditFromRequest({
+              req,
+              tableName: '...',
+              recordId: '...',
+              action: '...',
+              oldValues: '...',
+              newValues: '...',
+    }).catch(err => console.error('Audit log failed:', err));
     
     res.status(201).json({
       success: true,
@@ -735,16 +734,14 @@ router.put("/:id", async (req, res, next) => {
       data: data,
     });
     
-    await logAudit({
-      tableName: 'residents',
-      recordId: residentId,
-      action: 'UPDATE',
-      oldValues: oldResident,
-      newValues: resident,
-      walletAddress: user?.wallet_address || null,
-      ipAddress: getIpAddress(req),
-      userAgent: getUserAgent(req)
-    });
+    await logAuditFromRequest({
+              req,
+              tableName: '...',
+              recordId: '...',
+              action: '...',
+              oldValues: '...',
+              newValues: '...',
+    }).catch(err => console.error('Audit log failed:', err));
     
     res.json({ success: true, data: resident });
   } catch (err) {
@@ -783,15 +780,14 @@ router.delete("/:id", async (req, res, next) => {
       data: { is_active: false }
     });
     
-    await logAudit({
-      tableName: 'residents',
-      recordId: residentId,
-      action: 'DELETE',
-      oldValues: oldResident,
-      walletAddress: user?.wallet_address || null,
-      ipAddress: getIpAddress(req),
-      userAgent: getUserAgent(req)
-    });
+    await logAuditFromRequest({
+              req,
+              tableName: '...',
+              recordId: '...',
+              action: '...',
+              oldValues: '...',
+              newValues: '...',
+    }).catch(err => console.error('Audit log failed:', err));
     
     res.json({ 
       success: true,

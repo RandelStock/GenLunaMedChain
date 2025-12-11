@@ -4,6 +4,7 @@ import { PrismaClient } from '@prisma/client';
 import { ethers } from 'ethers';
 import { getBarangayFilter, canModifyRecord } from '../middleware/baranggayAccess.js';
 import { authenticateUser } from '../middleware/auth.js';
+import { logAuditFromRequest } from '../utils/auditLogger.js'; // ✅ IMPORT THIS
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -12,7 +13,6 @@ const prisma = new PrismaClient();
 // HELPER FUNCTIONS
 // ============================================
 
-// Helper function to generate hash (same as frontend)
 const generateMedicineHash = (medicineData) => {
   const dataString = JSON.stringify({
     name: medicineData.name,
@@ -27,8 +27,406 @@ const generateMedicineHash = (medicineData) => {
 };
 
 // ============================================
-// ROUTES
+// ROUTES (GET routes remain the same)
 // ============================================
+
+/**
+ * POST /api/medicines
+ * Create new medicine and stock with barangay assignment
+ */
+router.post('/', async (req, res) => {
+  try {
+    const {
+      medicine_name,
+      medicine_type,
+      description,
+      generic_name,
+      dosage_form,
+      strength,
+      manufacturer,
+      category,
+      storage_requirements,
+      batch_number,
+      quantity,
+      unit_cost,
+      supplier_name,
+      date_received,
+      expiry_date,
+      storage_location,
+      barangay
+    } = req.body;
+
+    // Validate required fields
+    if (!medicine_name || !batch_number || !quantity || !expiry_date) {
+      return res.status(400).json({ 
+        error: 'Missing required fields: medicine_name, batch_number, quantity, expiry_date' 
+      });
+    }
+
+    const parsedQuantity = parseInt(quantity);
+    if (isNaN(parsedQuantity) || parsedQuantity <= 0) {
+      return res.status(400).json({ error: 'Quantity must be a positive number' });
+    }
+
+    const expiryDateObj = new Date(expiry_date);
+    if (isNaN(expiryDateObj.getTime())) {
+      return res.status(400).json({ error: 'Invalid expiry date' });
+    }
+
+    // Determine barangay assignment
+    const user = req.user || null;
+    let assignedBarangay = barangay;
+
+    if (user && user.role !== 'ADMIN' && user.role !== 'MUNICIPAL_STAFF') {
+      assignedBarangay = user.assigned_barangay;
+    }
+
+    if (!assignedBarangay) {
+      assignedBarangay = 'MUNICIPAL';
+    }
+
+    // Check if batch number already exists
+    const existingMedicine = await prisma.medicine_records.findFirst({
+      where: {
+        medicine_name,
+        medicine_stocks: {
+          some: {
+            batch_number,
+            is_active: true
+          }
+        }
+      }
+    });
+
+    if (existingMedicine) {
+      return res.status(400).json({ 
+        error: 'Batch number already exists for this medicine' 
+      });
+    }
+
+    // Create medicine record
+    const medicine = await prisma.medicine_records.create({
+      data: {
+        medicine_name,
+        medicine_type: medicine_type || 'General',
+        description,
+        generic_name,
+        dosage_form,
+        strength,
+        manufacturer,
+        category,
+        storage_requirements,
+        barangay: assignedBarangay,
+        created_by: user?.user_id || null,
+        is_active: true,
+        created_at: new Date()
+      }
+    });
+
+    // Create stock record
+    const stock = await prisma.medicine_stocks.create({
+      data: {
+        medicine_id: medicine.medicine_id,
+        batch_number,
+        quantity: parsedQuantity,
+        remaining_quantity: parsedQuantity,
+        unit_cost: parseFloat(unit_cost) || 0,
+        total_cost: (parseFloat(unit_cost) || 0) * parsedQuantity,
+        supplier_name,
+        date_received: new Date(date_received || Date.now()),
+        expiry_date: expiryDateObj,
+        storage_location: storage_location || 'Main Storage',
+        is_active: true,
+        added_by_user_id: user?.user_id || null,
+        created_at: new Date()
+      }
+    });
+
+    // ✅ AUDIT LOG - Using helper function
+    await logAuditFromRequest({
+      req,
+      tableName: 'medicine',
+      recordId: medicine.medicine_id,
+      action: 'CREATE',
+      newValues: { ...medicine, stock }
+    });
+
+    res.status(201).json({
+      success: true,
+      medicine,
+      stock,
+      message: `Medicine created for ${assignedBarangay}`
+    });
+
+  } catch (error) {
+    console.error('Error creating medicine:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * PATCH /api/medicines/:id
+ * Update medicine with blockchain info
+ */
+router.patch('/:id', async (req, res) => {
+  try {
+    const medicineId = parseInt(req.params.id);
+
+    if (isNaN(medicineId)) {
+      return res.status(400).json({ error: 'Invalid medicine ID' });
+    }
+
+    const {
+      blockchain_hash,
+      blockchain_tx_hash,
+      transaction_hash
+    } = req.body;
+
+    // Get old values before update
+    const existingMedicine = await prisma.medicine_records.findUnique({
+      where: { medicine_id: medicineId }
+    });
+
+    if (!existingMedicine) {
+      return res.status(404).json({ error: 'Medicine not found' });
+    }
+
+    // Check barangay access
+    const user = req.user || null;
+    if (user && !canModifyRecord(user, existingMedicine.barangay)) {
+      return res.status(403).json({ error: 'Access denied to this barangay' });
+    }
+
+    const medicine = await prisma.medicine_records.update({
+      where: { medicine_id: medicineId },
+      data: {
+        blockchain_hash,
+        blockchain_tx_hash,
+        transaction_hash,
+        last_synced_at: new Date(),
+        updated_at: new Date()
+      }
+    });
+
+    // ✅ AUDIT LOG
+    await logAuditFromRequest({
+      req,
+      tableName: 'medicine',
+      recordId: medicineId,
+      action: 'PATCH',
+      oldValues: existingMedicine,
+      newValues: medicine
+    });
+
+    res.json({
+      success: true,
+      medicine
+    });
+
+  } catch (error) {
+    console.error('Error updating medicine:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * PUT /api/medicines/:id
+ * Update full medicine data with barangay access check
+ */
+router.put('/:id', async (req, res) => {
+  try {
+    const medicineId = parseInt(req.params.id);
+
+    if (isNaN(medicineId)) {
+      return res.status(400).json({ error: 'Invalid medicine ID' });
+    }
+
+    const {
+      medicine_name,
+      medicine_type,
+      description,
+      generic_name,
+      dosage_form,
+      strength,
+      manufacturer,
+      category,
+      storage_requirements,
+      barangay
+    } = req.body;
+
+    // Check if medicine exists and get old values
+    const existingMedicine = await prisma.medicine_records.findUnique({
+      where: { medicine_id: medicineId }
+    });
+
+    if (!existingMedicine) {
+      return res.status(404).json({ error: 'Medicine not found' });
+    }
+
+    // Check barangay access
+    const user = req.user || null;
+    if (user && !canModifyRecord(user, existingMedicine.barangay)) {
+      return res.status(403).json({ 
+        error: 'You do not have permission to modify this medicine',
+        medicineBarangay: existingMedicine.barangay,
+        yourBarangay: user.assigned_barangay
+      });
+    }
+
+    const updateData = {
+      medicine_name,
+      medicine_type,
+      description,
+      generic_name,
+      dosage_form,
+      strength,
+      manufacturer,
+      category,
+      storage_requirements,
+      updated_at: new Date()
+    };
+
+    // Only admin can change barangay assignment
+    if (user && (user.role === 'ADMIN' || user.role === 'MUNICIPAL_STAFF') && barangay) {
+      updateData.barangay = barangay;
+    }
+
+    const medicine = await prisma.medicine_records.update({
+      where: { medicine_id: medicineId },
+      data: updateData,
+      include: {
+        created_by_user: {
+          select: { full_name: true }
+        }
+      }
+    });
+
+    // ✅ AUDIT LOG - Using helper function (REPLACES old manual logging)
+    await logAuditFromRequest({
+      req,
+      tableName: 'medicine',
+      recordId: medicineId,
+      action: 'UPDATE',
+      oldValues: existingMedicine,
+      newValues: medicine
+    });
+
+    res.json({
+      success: true,
+      medicine
+    });
+
+  } catch (error) {
+    console.error('Error updating medicine:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * DELETE /api/medicines/:id
+ * Soft delete medicine with barangay access check
+ */
+router.delete('/:id', async (req, res) => {
+  try {
+    const medicineId = parseInt(req.params.id);
+
+    if (isNaN(medicineId)) {
+      return res.status(400).json({ error: 'Invalid medicine ID' });
+    }
+
+    // Check if medicine exists and get its data before deleting
+    const existingMedicine = await prisma.medicine_records.findUnique({
+      where: { medicine_id: medicineId },
+      include: {
+        medicine_stocks: true,
+        created_by_user: {
+          select: { full_name: true }
+        }
+      }
+    });
+
+    if (!existingMedicine) {
+      return res.status(404).json({ error: 'Medicine not found' });
+    }
+
+    // Check barangay access
+    const user = req.user || null;
+    if (user && !canModifyRecord(user, existingMedicine.barangay)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Soft delete medicine
+    await prisma.medicine_records.update({
+      where: { medicine_id: medicineId },
+      data: {
+        is_active: false,
+        updated_at: new Date()
+      }
+    });
+
+    // Also soft delete associated stocks
+    await prisma.medicine_stocks.updateMany({
+      where: { medicine_id: medicineId },
+      data: {
+        is_active: false
+      }
+    });
+
+    // ✅ AUDIT LOG - Using helper function (REPLACES old manual logging)
+    await logAuditFromRequest({
+      req,
+      tableName: 'medicine',
+      recordId: medicineId,
+      action: 'DELETE',
+      oldValues: existingMedicine,
+      newValues: null
+    });
+
+    // Blockchain delete logic...
+    let blockchainTxHash = null;
+    try {
+      const { default: blockchainService } = await import('../utils/blockchainUtils.js');
+      const tx = await blockchainService.contract.deleteMedicineHash(medicineId);
+      const receipt = await tx.wait();
+      blockchainTxHash = receipt.hash;
+
+      await prisma.medicine_records.update({
+        where: { medicine_id: medicineId },
+        data: {
+          blockchain_tx_hash: blockchainTxHash,
+          last_synced_at: new Date()
+        }
+      });
+
+      await prisma.blockchain_transactions.create({
+        data: {
+          tx_hash: receipt.hash,
+          block_number: BigInt(receipt.blockNumber),
+          contract_address: process.env.CONTRACT_ADDRESS,
+          action_type: 'DELETE',
+          entity_type: 'MEDICINE',
+          entity_id: medicineId,
+          from_address: blockchainService.wallet.address,
+          status: 'CONFIRMED',
+          confirmed_at: new Date(),
+          event_data: { timestamp: Math.floor(Date.now() / 1000) }
+        }
+      });
+    } catch (bcErr) {
+      console.error('Blockchain delete failed:', bcErr.message);
+    }
+
+    res.json({
+      success: true,
+      message: 'Medicine deleted successfully',
+      blockchain_tx_hash: blockchainTxHash || null
+    });
+
+  } catch (error) {
+    console.error('Error deleting medicine:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 /**
  * GET /api/medicines
@@ -223,409 +621,6 @@ router.get('/:id', async (req, res) => {
 });
 
 /**
- * POST /api/medicines
- * Create new medicine and stock with barangay assignment
- */
-router.post('/', async (req, res) => {
-  try {
-    const {
-      medicine_name,
-      medicine_type,
-      description,
-      generic_name,
-      dosage_form,
-      strength,
-      manufacturer,
-      category,
-      storage_requirements,
-      batch_number,
-      quantity,
-      unit_cost,
-      supplier_name,
-      date_received,
-      expiry_date,
-      storage_location,
-      wallet_address,
-      barangay // NEW: Barangay assignment
-    } = req.body;
-
-    // Validate required fields
-    if (!medicine_name || !batch_number || !quantity || !expiry_date) {
-      return res.status(400).json({ 
-        error: 'Missing required fields: medicine_name, batch_number, quantity, expiry_date' 
-      });
-    }
-
-    // Validate quantity is a valid number
-    const parsedQuantity = parseInt(quantity);
-    if (isNaN(parsedQuantity) || parsedQuantity <= 0) {
-      return res.status(400).json({ error: 'Quantity must be a positive number' });
-    }
-
-    // Validate expiry date
-    const expiryDateObj = new Date(expiry_date);
-    if (isNaN(expiryDateObj.getTime())) {
-      return res.status(400).json({ error: 'Invalid expiry date' });
-    }
-
-    // Determine barangay assignment
-    const user = req.user || null;
-    let assignedBarangay = barangay;
-
-    // If user is not admin, force their assigned barangay
-    if (user && user.role !== 'ADMIN' && user.role !== 'MUNICIPAL_STAFF') {
-      assignedBarangay = user.assigned_barangay;
-    }
-
-    // Default to MUNICIPAL if no barangay specified
-    if (!assignedBarangay) {
-      assignedBarangay = 'MUNICIPAL';
-    }
-
-    // Check if batch number already exists for this medicine
-    const existingMedicine = await prisma.medicine_records.findFirst({
-      where: {
-        medicine_name,
-        medicine_stocks: {
-          some: {
-            batch_number,
-            is_active: true
-          }
-        }
-      }
-    });
-
-    if (existingMedicine) {
-      return res.status(400).json({ 
-        error: 'Batch number already exists for this medicine' 
-      });
-    }
-
-    // Create medicine record
-    const medicine = await prisma.medicine_records.create({
-      data: {
-        medicine_name,
-        medicine_type: medicine_type || 'General',
-        description,
-        generic_name,
-        dosage_form,
-        strength,
-        manufacturer,
-        category,
-        storage_requirements,
-        barangay: assignedBarangay, // NEW: Assign barangay
-        created_by: user?.user_id || null,
-        is_active: true,
-        created_at: new Date()
-      }
-    });
-
-    // Create stock record
-    const stock = await prisma.medicine_stocks.create({
-      data: {
-        medicine_id: medicine.medicine_id,
-        batch_number,
-        quantity: parsedQuantity,
-        remaining_quantity: parsedQuantity,
-        unit_cost: parseFloat(unit_cost) || 0,
-        total_cost: (parseFloat(unit_cost) || 0) * parsedQuantity,
-        supplier_name,
-        date_received: new Date(date_received || Date.now()),
-        expiry_date: expiryDateObj,
-        storage_location: storage_location || 'Main Storage',
-        is_active: true,
-        added_by_wallet: wallet_address,
-        added_by_user_id: user?.user_id || null,
-        created_at: new Date()
-      }
-    });
-
-    res.status(201).json({
-      success: true,
-      medicine,
-      stock,
-      message: `Medicine created for ${assignedBarangay}`
-    });
-
-  } catch (error) {
-    console.error('Error creating medicine:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * PATCH /api/medicines/:id
- * Update medicine with blockchain info
- */
-router.patch('/:id', async (req, res) => {
-  try {
-    const medicineId = parseInt(req.params.id);
-
-    // Validate that medicineId is a valid number
-    if (isNaN(medicineId)) {
-      return res.status(400).json({ error: 'Invalid medicine ID' });
-    }
-
-    const {
-      blockchain_hash,
-      blockchain_tx_hash,
-      transaction_hash
-    } = req.body;
-
-    // Check if medicine exists
-    const existingMedicine = await prisma.medicine_records.findUnique({
-      where: { medicine_id: medicineId }
-    });
-
-    if (!existingMedicine) {
-      return res.status(404).json({ error: 'Medicine not found' });
-    }
-
-    // Check barangay access
-    const user = req.user || null;
-    if (user && !canModifyRecord(user, existingMedicine.barangay)) {
-      return res.status(403).json({ error: 'Access denied to this barangay' });
-    }
-
-    const medicine = await prisma.medicine_records.update({
-      where: { medicine_id: medicineId },
-      data: {
-        blockchain_hash,
-        blockchain_tx_hash,
-        transaction_hash,
-        last_synced_at: new Date(),
-        updated_at: new Date()
-      }
-    });
-
-    res.json({
-      success: true,
-      medicine
-    });
-
-  } catch (error) {
-    console.error('Error updating medicine:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * PUT /api/medicines/:id
- * Update full medicine data with barangay access check
- */
-router.put('/:id', async (req, res) => {
-  try {
-    const medicineId = parseInt(req.params.id);
-
-    if (isNaN(medicineId)) {
-      return res.status(400).json({ error: 'Invalid medicine ID' });
-    }
-
-    const {
-      medicine_name,
-      medicine_type,
-      description,
-      generic_name,
-      dosage_form,
-      strength,
-      manufacturer,
-      category,
-      storage_requirements,
-      barangay
-    } = req.body;
-
-    // Check if medicine exists and get old values
-    const existingMedicine = await prisma.medicine_records.findUnique({
-      where: { medicine_id: medicineId }
-    });
-
-    if (!existingMedicine) {
-      return res.status(404).json({ error: 'Medicine not found' });
-    }
-
-    // Check barangay access
-    const user = req.user || null;
-    if (user && !canModifyRecord(user, existingMedicine.barangay)) {
-      return res.status(403).json({ 
-        error: 'You do not have permission to modify this medicine',
-        medicineBarangay: existingMedicine.barangay,
-        yourBarangay: user.assigned_barangay
-      });
-    }
-
-    const updateData = {
-      medicine_name,
-      medicine_type,
-      description,
-      generic_name,
-      dosage_form,
-      strength,
-      manufacturer,
-      category,
-      storage_requirements,
-      updated_at: new Date()
-    };
-
-    // Only admin can change barangay assignment
-    if (user && (user.role === 'ADMIN' || user.role === 'MUNICIPAL_STAFF') && barangay) {
-      updateData.barangay = barangay;
-    }
-
-    const medicine = await prisma.medicine_records.update({
-      where: { medicine_id: medicineId },
-      data: updateData,
-      include: {
-        created_by_user: {
-          select: { full_name: true }
-        }
-      }
-    });
-
-    // ===== ADD AUDIT LOG =====
-    await prisma.audit_log.create({
-      data: {
-        table_name: 'medicine',
-        action: 'UPDATE',
-        record_id: medicineId,
-        old_values: existingMedicine, // Store old values
-        new_values: medicine, // Store new values
-        changed_by_wallet: req.body.wallet_address || req.headers['x-wallet-address'] || null,
-        changed_by: user?.user_id || null,
-        changed_at: new Date(),
-        medicine_id: medicineId
-      }
-    });
-    // ===== END AUDIT LOG =====
-
-    res.json({
-      success: true,
-      medicine
-    });
-
-  } catch (error) {
-    console.error('Error updating medicine:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * DELETE /api/medicines/:id
- * Soft delete medicine with barangay access check
- */
-router.delete('/:id', async (req, res) => {
-  try {
-    const medicineId = parseInt(req.params.id);
-
-    if (isNaN(medicineId)) {
-      return res.status(400).json({ error: 'Invalid medicine ID' });
-    }
-
-    // Check if medicine exists and get its data before deleting
-    const existingMedicine = await prisma.medicine_records.findUnique({
-      where: { medicine_id: medicineId },
-      include: {
-        medicine_stocks: true,
-        created_by_user: {
-          select: { full_name: true }
-        }
-      }
-    });
-
-    if (!existingMedicine) {
-      return res.status(404).json({ error: 'Medicine not found' });
-    }
-
-    // Check barangay access
-    const user = req.user || null;
-    if (user && !canModifyRecord(user, existingMedicine.barangay)) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
-
-    // Soft delete medicine
-    await prisma.medicine_records.update({
-      where: { medicine_id: medicineId },
-      data: {
-        is_active: false,
-        updated_at: new Date()
-      }
-    });
-
-    // Also soft delete associated stocks
-    await prisma.medicine_stocks.updateMany({
-      where: { medicine_id: medicineId },
-      data: {
-        is_active: false
-      }
-    });
-
-    // ===== ADD AUDIT LOG =====
-    await prisma.audit_log.create({
-      data: {
-        table_name: 'medicine',
-        action: 'DELETE',
-        record_id: medicineId,
-        old_values: existingMedicine, // Store the deleted record
-        new_values: null, // No new values for delete
-        changed_by_wallet: req.headers['x-wallet-address'] || null,
-        changed_by: user?.user_id || null,
-        changed_at: new Date(),
-        medicine_id: medicineId
-      }
-    });
-    // ===== END AUDIT LOG =====
-
-    // ===== BLOCKCHAIN DELETE & TX LOG =====
-    let blockchainTxHash = null;
-    try {
-      // Use backend wallet to perform blockchain delete; avoids MetaMask issues
-      const { default: blockchainService } = await import('../utils/blockchainUtils.js');
-      const tx = await blockchainService.contract.deleteMedicineHash(medicineId);
-      const receipt = await tx.wait();
-      blockchainTxHash = receipt.hash;
-
-      // Update medicine record with tx hash (even though soft-deleted)
-      await prisma.medicine_records.update({
-        where: { medicine_id: medicineId },
-        data: {
-          blockchain_tx_hash: blockchainTxHash,
-          last_synced_at: new Date()
-        }
-      });
-
-      // Log blockchain transaction for history page
-      await prisma.blockchain_transactions.create({
-        data: {
-          tx_hash: receipt.hash,
-          block_number: BigInt(receipt.blockNumber),
-          contract_address: process.env.CONTRACT_ADDRESS,
-          action_type: 'DELETE',
-          entity_type: 'MEDICINE',
-          entity_id: medicineId,
-          from_address: blockchainService.wallet.address,
-          status: 'CONFIRMED',
-          confirmed_at: new Date(),
-          event_data: { timestamp: Math.floor(Date.now() / 1000) }
-        }
-      });
-    } catch (bcErr) {
-      console.error('Blockchain delete failed:', bcErr.message);
-      // Continue without failing the delete; surface info to client
-    }
-    // ===== END BLOCKCHAIN DELETE & TX LOG =====
-
-    res.json({
-      success: true,
-      message: 'Medicine deleted successfully',
-      blockchain_tx_hash: blockchainTxHash || null
-    });
-
-  } catch (error) {
-    console.error('Error deleting medicine:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
  * POST /api/medicines/:id/verify
  * Verify medicine integrity
  */
@@ -681,7 +676,7 @@ router.post('/:id/verify', async (req, res) => {
       storedHash: medicine.blockchain_hash,
       reconstructedHash,
       data: reconstructedData,
-      barangay: medicine.barangay, // NEW: Include barangay in response
+      barangay: medicine.barangay,
       message: verified 
         ? 'Data integrity verified - medicine data has not been tampered with' 
         : 'Data integrity check failed - medicine data may have been modified'

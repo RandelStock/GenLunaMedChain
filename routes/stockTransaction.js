@@ -2,7 +2,7 @@
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
 import { getBarangayFilter, canModifyRecord } from '../middleware/baranggayAccess.js';
-import { logAudit, getIpAddress, getUserAgent } from '../utils/auditLogger.js';
+import { logAuditFromRequest } from '../utils/auditLogger.js';
 import NodeCache from 'node-cache';
 
 const router = express.Router();
@@ -392,14 +392,13 @@ router.post('/', async (req, res, next) => {
     console.log('✅ Transaction created:', transaction.transaction_id);
 
     // Log audit entry
-    await logAudit({
-      tableName: 'stock_transactions',
-      recordId: transaction.transaction_id,
-      action: 'INSERT',
-      newValues: transaction,
-      walletAddress: performed_by_wallet || req.headers['x-wallet-address'] || null,
-      ipAddress: getIpAddress(req),
-      userAgent: getUserAgent(req)
+    await logAuditFromRequest({
+              req,
+              tableName: '...',
+              recordId: '...',
+              action: '...',
+              oldValues: '...',
+              newValues: '...',
     }).catch(err => console.error('Audit log failed:', err));
 
     // Invalidate cache if blockchain info is already present
@@ -491,15 +490,13 @@ router.patch('/:id/blockchain', async (req, res, next) => {
     console.log('✅ Blockchain info updated for transaction:', transactionId);
 
     // Log audit entry
-    await logAudit({
-      tableName: 'stock_transactions',
-      recordId: transactionId,
-      action: 'UPDATE',
-      oldValues: existingTransaction,
-      newValues: updated,
-      walletAddress: req.headers['x-wallet-address'] || null,
-      ipAddress: getIpAddress(req),
-      userAgent: getUserAgent(req)
+    await logAuditFromRequest({
+              req,
+              tableName: '...',
+              recordId: '...',
+              action: '...',
+              oldValues: '...',
+              newValues: '...',
     }).catch(err => console.error('Audit log failed:', err));
 
     // Invalidate cache so blockchain history refreshes
@@ -573,14 +570,13 @@ router.delete('/:id', async (req, res, next) => {
     });
 
     // Log audit entry
-    await logAudit({
-      tableName: 'stock_transactions',
-      recordId: transactionId,
-      action: 'DELETE',
-      oldValues: transaction,
-      walletAddress: req.headers['x-wallet-address'] || null,
-      ipAddress: getIpAddress(req),
-      userAgent: getUserAgent(req)
+    await logAuditFromRequest({
+              req,
+              tableName: '...',
+              recordId: '...',
+              action: '...',
+              oldValues: '...',
+              newValues: '...',
     }).catch(err => console.error('Audit log failed:', err));
 
     // Invalidate cache

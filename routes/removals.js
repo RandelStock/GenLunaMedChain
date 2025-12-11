@@ -1,7 +1,7 @@
 // backend/routes/removals.js
 import express from "express";
 import { PrismaClient } from "@prisma/client";
-import { logAudit, getIpAddress, getUserAgent } from "../utils/auditLogger.js";
+import { logAuditFromRequest } from '../utils/auditLogger.js';
 import { getBarangayFilter, canModifyRecord } from '../middleware/baranggayAccess.js';
 import { authenticateUser } from '../middleware/auth.js';
 
@@ -358,14 +358,13 @@ router.post("/", async (req, res, next) => {
     });
 
     // Log audit entry for removal creation
-    await logAudit({
-      tableName: 'stock_removals',
-      recordId: removal.removal_id,
-      action: 'INSERT',
-      newValues: removal,
-      walletAddress: removed_by_wallet || req.headers['x-wallet-address'] || null,
-      ipAddress: getIpAddress(req),
-      userAgent: getUserAgent(req)
+    await logAuditFromRequest({
+          req,
+          tableName: '...',
+          recordId: '...',
+          action: '...',
+          oldValues: '...',
+          newValues: '...',
     }).catch(err => console.error('Audit log failed:', err));
 
     res.status(201).json({
@@ -430,15 +429,13 @@ router.patch("/:id/blockchain", async (req, res, next) => {
     });
 
     // Log audit entry for blockchain sync
-    await logAudit({
-      tableName: 'stock_removals',
-      recordId: removalId,
-      action: 'UPDATE',
-      oldValues: oldRemoval,
-      newValues: updated,
-      walletAddress: removed_by_wallet || req.headers['x-wallet-address'] || null,
-      ipAddress: getIpAddress(req),
-      userAgent: getUserAgent(req)
+    await logAuditFromRequest({
+          req,
+          tableName: '...',
+          recordId: '...',
+          action: '...',
+          oldValues: '...',
+          newValues: '...',
     }).catch(err => console.error('Audit log failed:', err));
 
     res.json({ success: true, data: updated });
@@ -491,14 +488,13 @@ router.delete("/:id", async (req, res, next) => {
     });
 
     // Log audit entry for deletion
-    await logAudit({
-      tableName: 'stock_removals',
-      recordId: removalId,
-      action: 'DELETE',
-      oldValues: removal,
-      walletAddress: removal.removed_by_wallet || req.headers['x-wallet-address'] || null,
-      ipAddress: getIpAddress(req),
-      userAgent: getUserAgent(req)
+    await logAuditFromRequest({
+          req,
+          tableName: '...',
+          recordId: '...',
+          action: '...',
+          oldValues: '...',
+          newValues: '...',
     }).catch(err => console.error('Audit log failed:', err));
 
     res.json({

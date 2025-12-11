@@ -1,7 +1,7 @@
 // backend/routes/consultations.js
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
-import { logAudit, getIpAddress, getUserAgent } from '../utils/auditLogger.js';
+import { logAuditFromRequest } from '../utils/auditLogger.js';
 import { getBarangayFilter, canModifyRecord } from '../middleware/baranggayAccess.js';
 import { optionalAuth } from '../middleware/auth.js';
 import { sendBookingConfirmation, sendConsultationConfirmed, sendConsultationCancelled } from '../utils/emailService.js';
@@ -594,15 +594,14 @@ router.post('/', async (req, res, next) => {
     ).catch(err => console.error('Error sending booking confirmation emails:', err));
     
     // Log audit
-    await logAudit({
-      tableName: 'consultations',
-      recordId: consultation.consultation_id,
-      action: 'INSERT',
-      newValues: consultation,
-      walletAddress: req.headers['x-wallet-address'] || null,
-      ipAddress: getIpAddress(req),
-      userAgent: getUserAgent(req)
-    });
+    await logAuditFromRequest({
+              req,
+              tableName: '...',
+              recordId: '...',
+              action: '...',
+              oldValues: '...',
+              newValues: '...',
+    }).catch(err => console.error('Audit log failed:', err));
     
     // Return success with resident information
     res.status(201).json({
@@ -888,16 +887,14 @@ router.put('/:id', async (req, res, next) => {
     }
     
     // Log audit
-    await logAudit({
-      tableName: 'consultations',
-      recordId: consultationId,
-      action: 'UPDATE',
-      oldValues: oldConsultation,
-      newValues: consultation,
-      walletAddress: req.headers['x-wallet-address'] || null,
-      ipAddress: getIpAddress(req),
-      userAgent: getUserAgent(req)
-    });
+    await logAuditFromRequest({
+              req,
+              tableName: '...',
+              recordId: '...',
+              action: '...',
+              oldValues: '...',
+              newValues: '...',
+    }).catch(err => console.error('Audit log failed:', err));
     
     res.json({
       success: true,

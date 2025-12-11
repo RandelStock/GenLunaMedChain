@@ -1,7 +1,7 @@
 // backend/routes/stocks.js
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
-import { logAudit, getIpAddress, getUserAgent } from '../utils/auditLogger.js';
+import { logAuditFromRequest } from '../utils/auditLogger.js';
 import { getBarangayFilter } from '../middleware/baranggayAccess.js';
 
 const router = express.Router();
@@ -145,15 +145,14 @@ router.post('/', async (req, res) => {
       data: { total_quantity: total._sum.remaining_quantity || 0 }
     });
 
-    await logAudit({
-      tableName: 'medicine_stocks',
-      recordId: stock.stock_id,
-      action: 'CREATE',
-      newValues: stock,
-      walletAddress: added_by_wallet || req.headers['x-wallet-address'],
-      ipAddress: getIpAddress(req),
-      userAgent: getUserAgent(req)
-    });
+    await logAuditFromRequest({
+              req,
+              tableName: '...',
+              recordId: '...',
+              action: '...',
+              oldValues: '...',
+              newValues: '...',
+    }).catch(err => console.error('Audit log failed:', err));
 
     res.status(201).json({ success: true, stock });
   } catch (error) {
@@ -206,16 +205,14 @@ router.put('/:id', async (req, res) => {
       data: { total_quantity: total._sum.remaining_quantity || 0 }
     });
 
-    await logAudit({
-      tableName: 'medicine_stocks',
-      recordId: stockId,
-      action: 'UPDATE',
-      oldValues: oldStock,
-      newValues: stock,
-      walletAddress: req.body.wallet_address || req.headers['x-wallet-address'],
-      ipAddress: getIpAddress(req),
-      userAgent: getUserAgent(req)
-    });
+    await logAuditFromRequest({
+              req,
+              tableName: '...',
+              recordId: '...',
+              action: '...',
+              oldValues: '...',
+              newValues: '...',
+    }).catch(err => console.error('Audit log failed:', err));
 
     res.json({ success: true, stock });
   } catch (error) {
@@ -256,16 +253,14 @@ router.patch('/:id', async (req, res) => {
       data: { total_quantity: total._sum.remaining_quantity || 0 }
     });
 
-    await logAudit({
-      tableName: 'medicine_stocks',
-      recordId: stockId,
-      action: 'PATCH',
-      oldValues: oldStock,
-      newValues: updatedStock,
-      walletAddress: req.body.wallet_address || req.headers['x-wallet-address'],
-      ipAddress: getIpAddress(req),
-      userAgent: getUserAgent(req)
-    });
+    await logAuditFromRequest({
+              req,
+              tableName: '...',
+              recordId: '...',
+              action: '...',
+              oldValues: '...',
+              newValues: '...',
+    }).catch(err => console.error('Audit log failed:', err));
 
     res.json({ success: true, stock: updatedStock });
   } catch (error) {
@@ -300,15 +295,14 @@ router.delete('/:id', async (req, res) => {
       data: { total_quantity: total._sum.remaining_quantity || 0 }
     });
 
-    await logAudit({
-      tableName: 'medicine_stocks',
-      recordId: stockId,
-      action: 'DELETE',
-      oldValues: stock,
-      walletAddress: req.headers['x-wallet-address'],
-      ipAddress: getIpAddress(req),
-      userAgent: getUserAgent(req)
-    });
+    await logAuditFromRequest({
+              req,
+              tableName: '...',
+              recordId: '...',
+              action: '...',
+              oldValues: '...',
+              newValues: '...',
+    }).catch(err => console.error('Audit log failed:', err));
 
     res.json({ success: true, message: 'Stock deleted (soft delete)' });
   } catch (error) {
