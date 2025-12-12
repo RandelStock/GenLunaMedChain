@@ -145,13 +145,14 @@ router.post('/', async (req, res) => {
       data: { total_quantity: total._sum.remaining_quantity || 0 }
     });
 
+    // POST /api/stocks - Create stock
     await logAuditFromRequest({
-              req,
-              tableName: '...',
-              recordId: '...',
-              action: '...',
-              oldValues: '...',
-              newValues: '...',
+      req,
+      tableName: 'medicine_stocks',
+      recordId: stock.stock_id,
+      action: 'CREATE',
+      oldValues: null,
+      newValues: stock,
     }).catch(err => console.error('Audit log failed:', err));
 
     res.status(201).json({ success: true, stock });
@@ -205,13 +206,14 @@ router.put('/:id', async (req, res) => {
       data: { total_quantity: total._sum.remaining_quantity || 0 }
     });
 
+    // PUT /api/stocks/:id - Update stock
     await logAuditFromRequest({
-              req,
-              tableName: '...',
-              recordId: '...',
-              action: '...',
-              oldValues: '...',
-              newValues: '...',
+      req,
+      tableName: 'medicine_stocks',
+      recordId: stockId,
+      action: 'UPDATE',
+      oldValues: oldStock,
+      newValues: stock,
     }).catch(err => console.error('Audit log failed:', err));
 
     res.json({ success: true, stock });
@@ -253,13 +255,14 @@ router.patch('/:id', async (req, res) => {
       data: { total_quantity: total._sum.remaining_quantity || 0 }
     });
 
+    // PATCH /api/stocks/:id - Partial update
     await logAuditFromRequest({
-              req,
-              tableName: '...',
-              recordId: '...',
-              action: '...',
-              oldValues: '...',
-              newValues: '...',
+      req,
+      tableName: 'medicine_stocks',
+      recordId: stockId,
+      action: 'PATCH',
+      oldValues: oldStock,
+      newValues: updatedStock,
     }).catch(err => console.error('Audit log failed:', err));
 
     res.json({ success: true, stock: updatedStock });
@@ -295,13 +298,14 @@ router.delete('/:id', async (req, res) => {
       data: { total_quantity: total._sum.remaining_quantity || 0 }
     });
 
+    // DELETE /api/stocks/:id - Soft delete
     await logAuditFromRequest({
-              req,
-              tableName: '...',
-              recordId: '...',
-              action: '...',
-              oldValues: '...',
-              newValues: '...',
+      req,
+      tableName: 'medicine_stocks',
+      recordId: stockId,
+      action: 'DELETE',
+      oldValues: stock,
+      newValues: { is_active: false },
     }).catch(err => console.error('Audit log failed:', err));
 
     res.json({ success: true, message: 'Stock deleted (soft delete)' });

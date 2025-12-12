@@ -391,14 +391,14 @@ router.post('/', async (req, res, next) => {
 
     console.log('✅ Transaction created:', transaction.transaction_id);
 
-    // Log audit entry
+    // POST /api/stock-transactions - Create transaction
     await logAuditFromRequest({
-              req,
-              tableName: '...',
-              recordId: '...',
-              action: '...',
-              oldValues: '...',
-              newValues: '...',
+      req,
+      tableName: 'stock_transactions',
+      recordId: transaction.transaction_id,
+      action: 'CREATE',
+      oldValues: null,
+      newValues: transaction,
     }).catch(err => console.error('Audit log failed:', err));
 
     // Invalidate cache if blockchain info is already present
@@ -489,15 +489,16 @@ router.patch('/:id/blockchain', async (req, res, next) => {
 
     console.log('✅ Blockchain info updated for transaction:', transactionId);
 
-    // Log audit entry
+    // PATCH /api/stock-transactions/:id/blockchain - Update blockchain
     await logAuditFromRequest({
-              req,
-              tableName: '...',
-              recordId: '...',
-              action: '...',
-              oldValues: '...',
-              newValues: '...',
+      req,
+      tableName: 'stock_transactions',
+      recordId: transactionId,
+      action: 'PATCH',
+      oldValues: existingTransaction,
+      newValues: updated,
     }).catch(err => console.error('Audit log failed:', err));
+
 
     // Invalidate cache so blockchain history refreshes
     hashCache.del('blockchain_hashes');
@@ -569,15 +570,15 @@ router.delete('/:id', async (req, res, next) => {
       where: { transaction_id: transactionId }
     });
 
-    // Log audit entry
-    await logAuditFromRequest({
-              req,
-              tableName: '...',
-              recordId: '...',
-              action: '...',
-              oldValues: '...',
-              newValues: '...',
-    }).catch(err => console.error('Audit log failed:', err));
+   // DELETE /api/stock-transactions/:id - Delete transaction
+  await logAuditFromRequest({
+    req,
+    tableName: 'stock_transactions',
+    recordId: transactionId,
+    action: 'DELETE',
+    oldValues: transaction,
+    newValues: null,
+  }).catch(err => console.error('Audit log failed:', err));
 
     // Invalidate cache
     hashCache.del('blockchain_hashes');

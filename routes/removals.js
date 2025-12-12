@@ -357,14 +357,14 @@ router.post("/", async (req, res, next) => {
       }
     });
 
-    // Log audit entry for removal creation
+    // PATCH /api/removals/:id/blockchain - Update blockchain info
     await logAuditFromRequest({
-          req,
-          tableName: '...',
-          recordId: '...',
-          action: '...',
-          oldValues: '...',
-          newValues: '...',
+      req,
+      tableName: 'stock_removals',
+      recordId: removalId,
+      action: 'PATCH',
+      oldValues: oldRemoval,
+      newValues: updated,
     }).catch(err => console.error('Audit log failed:', err));
 
     res.status(201).json({
@@ -428,14 +428,14 @@ router.patch("/:id/blockchain", async (req, res, next) => {
       }
     });
 
-    // Log audit entry for blockchain sync
+    // PATCH /api/removals/:id/blockchain - Update blockchain info
     await logAuditFromRequest({
-          req,
-          tableName: '...',
-          recordId: '...',
-          action: '...',
-          oldValues: '...',
-          newValues: '...',
+      req,
+      tableName: 'stock_removals',
+      recordId: removalId,
+      action: 'PATCH',
+      oldValues: oldRemoval,
+      newValues: updated,
     }).catch(err => console.error('Audit log failed:', err));
 
     res.json({ success: true, data: updated });
@@ -487,14 +487,14 @@ router.delete("/:id", async (req, res, next) => {
       where: { removal_id: removalId }
     });
 
-    // Log audit entry for deletion
+    // DELETE /api/removals/:id - Delete removal
     await logAuditFromRequest({
-          req,
-          tableName: '...',
-          recordId: '...',
-          action: '...',
-          oldValues: '...',
-          newValues: '...',
+      req,
+      tableName: 'stock_removals',
+      recordId: removalId,
+      action: 'DELETE',
+      oldValues: removal,
+      newValues: null,
     }).catch(err => console.error('Audit log failed:', err));
 
     res.json({

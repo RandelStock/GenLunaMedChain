@@ -321,14 +321,14 @@ router.post("/", async (req, res, next) => {
       }
     });
     
-    // Log audit entry
+    // POST /api/releases - Create release
     await logAuditFromRequest({
       req,
-      tableName: '...',
-      recordId: '...',
-      action: '...',
-      oldValues: '...',
-      newValues: '...',
+      tableName: 'medicine_releases',
+      recordId: release.release_id,
+      action: 'CREATE',
+      oldValues: null,
+      newValues: release,
     }).catch(err => console.error('Audit log failed:', err));
     
     res.status(201).json({
@@ -383,14 +383,14 @@ router.patch("/:id", async (req, res, next) => {
       }
     });
 
-    // Log audit entry for blockchain update
+    // PATCH /api/releases/:id - Update blockchain info
     await logAuditFromRequest({
       req,
-      tableName: '...',
-      recordId: '...',
-      action: '...',
-      oldValues: '...',
-      newValues: '...',
+      tableName: 'medicine_releases',
+      recordId: releaseId,
+      action: 'PATCH',
+      oldValues: existingRelease,
+      newValues: release,
     }).catch(err => console.error('Audit log failed:', err));
 
     res.json({ success: true, data: release });
@@ -433,14 +433,14 @@ router.put("/:id", async (req, res, next) => {
       data: req.body
     });
     
-    // Log audit entry
+    // PUT /api/releases/:id - Update release
     await logAuditFromRequest({
       req,
-      tableName: '...',
-      recordId: '...',
-      action: '...',
-      oldValues: '...',
-      newValues: '...',
+      tableName: 'medicine_releases',
+      recordId: releaseId,
+      action: 'UPDATE',
+      oldValues: oldRelease,
+      newValues: release,
     }).catch(err => console.error('Audit log failed:', err));
     
     res.json({ success: true, data: release });
@@ -496,14 +496,14 @@ router.delete("/:id", async (req, res, next) => {
       where: { release_id: releaseId }
     });
     
-    // Log audit entry with blockchain info
+    // DELETE /api/releases/:id - Delete release
     await logAuditFromRequest({
       req,
-      tableName: '...',
-      recordId: '...',
-      action: '...',
-      oldValues: '...',
-      newValues: '...',
+      tableName: 'medicine_releases',
+      recordId: releaseId,
+      action: 'DELETE',
+      oldValues: oldRelease,
+      newValues: null,
     }).catch(err => console.error('Audit log failed:', err));
     
     res.json({ 

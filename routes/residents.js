@@ -648,13 +648,14 @@ router.post("/", async (req, res, next) => {
       data: data 
     });
     
+    // POST /api/residents - Create resident
     await logAuditFromRequest({
-              req,
-              tableName: '...',
-              recordId: '...',
-              action: '...',
-              oldValues: '...',
-              newValues: '...',
+      req,
+      tableName: 'residents',
+      recordId: resident.resident_id,
+      action: 'CREATE',
+      oldValues: null,
+      newValues: resident,
     }).catch(err => console.error('Audit log failed:', err));
     
     res.status(201).json({
@@ -734,13 +735,14 @@ router.put("/:id", async (req, res, next) => {
       data: data,
     });
     
+    // PUT /api/residents/:id - Update resident
     await logAuditFromRequest({
-              req,
-              tableName: '...',
-              recordId: '...',
-              action: '...',
-              oldValues: '...',
-              newValues: '...',
+      req,
+      tableName: 'residents',
+      recordId: residentId,
+      action: 'UPDATE',
+      oldValues: oldResident,
+      newValues: resident,
     }).catch(err => console.error('Audit log failed:', err));
     
     res.json({ success: true, data: resident });
@@ -780,13 +782,14 @@ router.delete("/:id", async (req, res, next) => {
       data: { is_active: false }
     });
     
+    // DELETE /api/residents/:id - Soft delete resident
     await logAuditFromRequest({
-              req,
-              tableName: '...',
-              recordId: '...',
-              action: '...',
-              oldValues: '...',
-              newValues: '...',
+      req,
+      tableName: 'residents',
+      recordId: residentId,
+      action: 'DELETE',
+      oldValues: oldResident,
+      newValues: { is_active: false },
     }).catch(err => console.error('Audit log failed:', err));
     
     res.json({ 

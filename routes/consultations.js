@@ -593,14 +593,14 @@ router.post('/', async (req, res, next) => {
       providerName
     ).catch(err => console.error('Error sending booking confirmation emails:', err));
     
-    // Log audit
+    // POST /api/consultations - Create consultation
     await logAuditFromRequest({
-              req,
-              tableName: '...',
-              recordId: '...',
-              action: '...',
-              oldValues: '...',
-              newValues: '...',
+      req,
+      tableName: 'consultations',
+      recordId: consultation.consultation_id,
+      action: 'CREATE',
+      oldValues: null,
+      newValues: consultation,
     }).catch(err => console.error('Audit log failed:', err));
     
     // Return success with resident information
@@ -886,14 +886,14 @@ router.put('/:id', async (req, res, next) => {
       }
     }
     
-    // Log audit
+    // PUT /api/consultations/:id - Update consultation
     await logAuditFromRequest({
-              req,
-              tableName: '...',
-              recordId: '...',
-              action: '...',
-              oldValues: '...',
-              newValues: '...',
+      req,
+      tableName: 'consultations',
+      recordId: consultationId,
+      action: 'UPDATE',
+      oldValues: oldConsultation,
+      newValues: consultation,
     }).catch(err => console.error('Audit log failed:', err));
     
     res.json({
