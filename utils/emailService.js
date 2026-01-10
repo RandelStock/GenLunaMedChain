@@ -1,4 +1,3 @@
-// backend/utils/emailService.js
 import nodemailer from 'nodemailer';
 import SibApiV3Sdk from 'sib-api-v3-sdk';
 
