@@ -1,24 +1,38 @@
 // backend/utils/emailService.js
 import nodemailer from 'nodemailer';
+import SibApiV3Sdk from 'sib-api-v3-sdk';
 
-// Safely import SendGrid with error handling
-let sgMail = null;
+// ============================================
+// BREVO API INITIALIZATION (Primary)
+// ============================================
+let brevoClient = null;
+
 try {
-  const sendgridModule = await import('@sendgrid/mail');
-  sgMail = sendgridModule.default;
-  
-  // Initialize SendGrid if API key is available
-  if (process.env.SENDGRID_API_KEY) {
-    sgMail.setApiKey(process.env.SENDGRID_API_KEY);
-    console.log('📧 SendGrid API initialized');
+  if (process.env.BREVO_API_KEY) {
+    const defaultClient = SibApiV3Sdk.ApiClient.instance;
+    const apiKey = defaultClient.authentications['api-key'];
+    apiKey.apiKey = process.env.BREVO_API_KEY;
+
+    brevoClient = new SibApiV3Sdk.TransactionalEmailsApi();
+    console.log('📧 Brevo API initialized successfully');
+  } else {
+    console.warn('⚠️ BREVO_API_KEY not found in environment variables');
   }
 } catch (error) {
-  console.warn('⚠️ SendGrid module not available, will use fallback email method');
+  console.warn('⚠️ Brevo API initialization failed:', error.message);
+  console.warn('   Will use SMTP fallback for email delivery');
 }
 
-// Create email transporter using Gmail (fallback)
+// ============================================
+// GMAIL SMTP FALLBACK
+// ============================================
 const createGmailTransporter = () => {
-  console.log('⚠️ Using Gmail SMTP (may not work on cloud platforms)');
+  console.log('⚠️ Using Gmail SMTP (fallback method)');
+  
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
+    throw new Error('Gmail credentials (EMAIL_USER, EMAIL_PASSWORD) not configured');
+  }
+  
   return nodemailer.createTransport({
     host: 'smtp.gmail.com',
     port: 587,
@@ -36,7 +50,9 @@ const createGmailTransporter = () => {
   });
 };
 
-// Email templates (keeping your existing templates)
+// ============================================
+// EMAIL TEMPLATES (UNCHANGED)
+// ============================================
 const emailTemplates = {
   // Patient: New booking confirmation
   patientBookingConfirmation: (consultation, providerName) => ({
@@ -374,52 +390,70 @@ const emailTemplates = {
   })
 };
 
-// Send email function using SendGrid Web API (preferred) or fallback to SMTP
+// ============================================
+// CORE EMAIL SENDING FUNCTION
+// ============================================
 export const sendEmail = async (to, subject, html) => {
   try {
-    console.log('🔧 Email Configuration:');
-    console.log('  - SendGrid Available:', !!sgMail);
-    console.log('  - Using SendGrid API:', !!(process.env.SENDGRID_API_KEY && sgMail));
-    console.log('  - From Email:', process.env.EMAIL_USER);
+    console.log('📧 Email Configuration:');
+    console.log('  - Brevo Client:', brevoClient ? '✅ Available' : '❌ Not Available');
+    console.log('  - From Email:', process.env.EMAIL_FROM || process.env.EMAIL_USER);
     console.log('  - To Email:', to);
     
-    const fromEmail = process.env.EMAIL_USER;
+    const fromEmail = process.env.EMAIL_FROM || process.env.EMAIL_USER;
+    const fromName = process.env.EMAIL_FROM_NAME || 'GenLunaMedChain';
     
-    // Try SendGrid Web API first (recommended - doesn't use SMTP ports)
-    if (process.env.SENDGRID_API_KEY && sgMail) {
-      console.log('📧 Using SendGrid Web API for email delivery');
-      
-      const msg = {
-        to: to,
-        from: fromEmail, // Must be verified in SendGrid
-        subject: subject,
-        html: html,
-      };
+    if (!fromEmail) {
+      throw new Error('Email sender not configured (EMAIL_FROM or EMAIL_USER missing)');
+    }
 
-      const response = await sgMail.send(msg);
-      console.log('✅ Email sent via SendGrid API');
-      console.log('📊 Response status:', response[0].statusCode);
+    // ============================================
+    // PRIORITY 1: BREVO REST API (RECOMMENDED)
+    // ============================================
+    if (process.env.BREVO_API_KEY && brevoClient) {
+      console.log('📧 Using Brevo REST API for email delivery');
+      
+      const sendSmtpEmail = new SibApiV3Sdk.SendSmtpEmail({
+        sender: {
+          email: fromEmail,
+          name: fromName
+        },
+        to: [{ email: to }],
+        subject: subject,
+        htmlContent: html
+      });
+
+      const response = await brevoClient.sendTransacEmail(sendSmtpEmail);
+      
+      console.log('✅ Email sent successfully via Brevo API');
+      console.log('📊 Message ID:', response.messageId);
       
       return { 
         success: true, 
-        messageId: response[0].headers['x-message-id'],
-        provider: 'sendgrid-api'
+        messageId: response.messageId,
+        provider: 'brevo-api'
       };
     } 
-    // Fallback to Gmail SMTP
+    
+    // ============================================
+    // FALLBACK: GMAIL SMTP
+    // ============================================
     else {
-      console.log('📧 Using Gmail SMTP (fallback)');
+      console.log('⚠️ Brevo API not available, using Gmail SMTP fallback');
+      
       const transporter = createGmailTransporter();
       
       const mailOptions = {
-        from: `GenLunaMedChain <${fromEmail}>`,
+        from: `${fromName} <${fromEmail}>`,
         to: to,
         subject: subject,
         html: html
       };
 
       const info = await transporter.sendMail(mailOptions);
-      console.log('✅ Email sent via Gmail SMTP:', info.messageId);
+      
+      console.log('✅ Email sent via Gmail SMTP');
+      console.log('📊 Message ID:', info.messageId);
       
       return { 
         success: true, 
@@ -433,61 +467,76 @@ export const sendEmail = async (to, subject, html) => {
     console.error('  - Message:', error.message);
     console.error('  - Code:', error.code);
     
-    // SendGrid specific error handling
+    // Brevo-specific error handling
     if (error.response) {
-      console.error('  - SendGrid Response:', JSON.stringify(error.response.body));
+      console.error('  - Brevo Response Body:', JSON.stringify(error.response.body || error.response));
+      console.error('  - Status Code:', error.statusCode);
     }
     
     return { 
       success: false, 
       error: error.message, 
       code: error.code,
-      details: error.response?.body
+      details: error.response?.body || error.response
     };
   }
 };
 
-// Send booking confirmation emails
+// ============================================
+// EMAIL HELPER FUNCTIONS (UNCHANGED)
+// ============================================
+
+// Send booking confirmation emails to patient and provider
 export const sendBookingConfirmation = async (consultation, providerEmail, providerName) => {
   try {
     const results = [];
 
     // Send to patient if email exists
     if (consultation.patient_email) {
+      console.log('📧 Sending booking confirmation to patient:', consultation.patient_email);
       const patientTemplate = emailTemplates.patientBookingConfirmation(consultation, providerName);
       const patientResult = await sendEmail(
         consultation.patient_email,
         patientTemplate.subject,
         patientTemplate.html
       );
-      results.push({ recipient: 'patient', ...patientResult });
+      results.push({ recipient: 'patient', email: consultation.patient_email, ...patientResult });
+    } else {
+      console.log('⚠️ No patient email provided, skipping patient notification');
+      results.push({ recipient: 'patient', success: false, error: 'No patient email' });
     }
 
     // Send to provider
     if (providerEmail) {
+      console.log('📧 Sending booking notification to provider:', providerEmail);
       const providerTemplate = emailTemplates.providerNewBooking(consultation, providerName);
       const providerResult = await sendEmail(
         providerEmail,
         providerTemplate.subject,
         providerTemplate.html
       );
-      results.push({ recipient: 'provider', ...providerResult });
+      results.push({ recipient: 'provider', email: providerEmail, ...providerResult });
+    } else {
+      console.log('⚠️ No provider email provided, skipping provider notification');
+      results.push({ recipient: 'provider', success: false, error: 'No provider email' });
     }
 
     return results;
   } catch (error) {
-    console.error('Error sending booking confirmation emails:', error);
-    return [];
+    console.error('❌ Error sending booking confirmation emails:', error);
+    return [{ success: false, error: error.message }];
   }
 };
 
-// Send consultation confirmed email
+// Send consultation confirmed email to patient
 export const sendConsultationConfirmed = async (consultation, providerName) => {
   try {
     if (!consultation.patient_email) {
+      console.log('⚠️ No patient email, cannot send confirmation');
       return { success: false, error: 'No patient email' };
     }
 
+    console.log('📧 Sending consultation confirmed email to:', consultation.patient_email);
     const template = emailTemplates.patientConfirmed(consultation, providerName);
     return await sendEmail(
       consultation.patient_email,
@@ -495,18 +544,20 @@ export const sendConsultationConfirmed = async (consultation, providerName) => {
       template.html
     );
   } catch (error) {
-    console.error('Error sending consultation confirmed email:', error);
+    console.error('❌ Error sending consultation confirmed email:', error);
     return { success: false, error: error.message };
   }
 };
 
-// Send consultation cancelled email
+// Send consultation cancelled email to patient
 export const sendConsultationCancelled = async (consultation, providerName) => {
   try {
     if (!consultation.patient_email) {
+      console.log('⚠️ No patient email, cannot send cancellation notice');
       return { success: false, error: 'No patient email' };
     }
 
+    console.log('📧 Sending consultation cancelled email to:', consultation.patient_email);
     const template = emailTemplates.patientCancelled(consultation, providerName);
     return await sendEmail(
       consultation.patient_email,
@@ -514,11 +565,12 @@ export const sendConsultationCancelled = async (consultation, providerName) => {
       template.html
     );
   } catch (error) {
-    console.error('Error sending consultation cancelled email:', error);
+    console.error('❌ Error sending consultation cancelled email:', error);
     return { success: false, error: error.message };
   }
 };
 
+// Default export for convenience
 export default {
   sendEmail,
   sendBookingConfirmation,
