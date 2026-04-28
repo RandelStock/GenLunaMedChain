@@ -21,6 +21,7 @@ import blockchainRoutes from "./routes/blockchain.js";
 import scheduleRoutes from "./routes/schedule.js";
 import consultationsRoutes from "./routes/consultations.js";
 import providerProfilesRoutes from "./routes/providerProfiles.js";
+import systemRoutes from "./routes/system.js";
 
 // Services
 import blockchainService from "./utils/blockchainUtils.js";  // ✅ Added
@@ -73,6 +74,7 @@ app.use("/blockchain", blockchainRoutes);
 app.use("/schedule", scheduleRoutes);
 app.use("/consultations", consultationsRoutes);
 app.use("/provider-profiles", providerProfilesRoutes);
+app.use("/system", systemRoutes);
 
 // Error handler
 app.use((err, req, res, next) => {
