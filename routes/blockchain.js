@@ -74,17 +74,21 @@ function calculateCounts(hashes) {
  */
 router.get("/hashes", async (req, res, next) => {
   try {
+    const bypassCache = req.query.noCache === "1" || req.query.noCache === "true";
     // Check if we have cached data
     const cacheKey = "blockchain_hashes";
     const cachedHashes = hashCache.get(cacheKey);
     
-    if (cachedHashes) {
+    if (cachedHashes && !bypassCache) {
       console.log("📊 Returning cached blockchain hashes");
       return res.json({
         success: true,
         hashes: cachedHashes,
         counts: calculateCounts(cachedHashes)
       });
+    }
+    if (bypassCache) {
+      console.log("📊 Fetching blockchain hashes with cache bypass");
     }
     
     console.log("📊 Fetching blockchain hashes from database (OPTIMIZED)");
